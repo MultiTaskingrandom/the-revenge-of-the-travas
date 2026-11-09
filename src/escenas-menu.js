@@ -4,15 +4,20 @@ const ESTILO = (tam, color) => ({
   stroke: '#000000', strokeThickness: Math.max(3, Math.round(tam / 6)), align: 'center'
 });
 
+// segundos -> "m:ss"
+function formatoTiempo(seg) {
+  seg = Math.floor(seg);
+  return Math.floor(seg / 60) + ':' + String(seg % 60).padStart(2, '0');
+}
+
 function controlesDefecto() { return JSON.parse(JSON.stringify(window.JUEGO.CONTROLES_DEFECTO)); }
 
 function leerOpciones() {
-  let o = { vidas: 3, modoDios: false, controles: controlesDefecto() };
+  let o = { vidas: 3, controles: controlesDefecto() };
   try {
     const g = JSON.parse(localStorage.getItem('trav_opciones'));
     if (g) {
       o.vidas = g.vidas || o.vidas;
-      o.modoDios = !!g.modoDios;
       if (g.controles) for (const acc in o.controles) if (Array.isArray(g.controles[acc])) o.controles[acc] = g.controles[acc];
     }
   } catch (e) {}
@@ -119,10 +124,9 @@ class EscenaMenu extends Phaser.Scene {
       this.ayuda.setText(this.tactil ? 'Tocá una opción para cambiarla' : '◀ ▶ cambian el valor  ·  ESC vuelve');
       this.items.push(this.add.text(480, 448, 'OPCIONES', ESTILO(26, '#ffd34f')).setOrigin(0.5));
       // en celular no se muestra "CONTROLES" (son para teclado)
-      this.ids = this.tactil ? ['vidas', 'dios', 'volver'] : ['vidas', 'dios', 'controles', 'volver'];
+      this.ids = this.tactil ? ['vidas', 'volver'] : ['vidas', 'controles', 'volver'];
       const textos = {
         vidas: 'VIDAS:  ◀ ' + this.opc.vidas + ' ▶',
-        dios: 'MODO DIOS:  ◀ ' + (this.opc.modoDios ? 'SÍ' : 'NO') + ' ▶',
         controles: 'CONTROLES',
         volver: 'VOLVER'
       };
@@ -203,7 +207,7 @@ class EscenaMenu extends Phaser.Scene {
       if (id === 'vidas') {
         // con el dedo (circular) da la vuelta: 1, 2, ... 9, 1
         this.opc.vidas = circular ? (this.opc.vidas % 9) + 1 : Phaser.Math.Clamp(this.opc.vidas + d, 1, 9);
-      } else if (id === 'dios') this.opc.modoDios = !this.opc.modoDios;
+      }
       else return;
       guardarOpciones(this.opc);
       Sonido.menu();
@@ -279,6 +283,9 @@ class EscenaHistoria extends Phaser.Scene {
   create() {
     const C = window.JUEGO.config;
     const opc = this.registry.get('opciones') || leerOpciones();
+    // Phaser reutiliza la misma escena en cada partida: hay que reiniciar esta marca
+    // (si no, la segunda vez la historia nunca pasaba al nivel)
+    this.yendo = false;
     this.add.image(480, 0, 'fondojugando').setOrigin(0.5, 0);
     this.add.rectangle(480, 360, 960, 720, 0x000000, 0.72);
     this.lineas = (C.textos.historia || []).concat([textoControles(opc.controles)]);
@@ -337,6 +344,12 @@ class EscenaFinal extends Phaser.Scene {
       this.add.text(480, 370, T.derrota, ESTILO(24)).setOrigin(0.5).setWordWrapWidth(900);
     }
     this.add.text(480, 270 + (gano ? 0 : 160), 'PUNTOS: ' + (data.puntos || 0), ESTILO(26, '#5ff4ff')).setOrigin(0.5);
+    // al perder, se muestra lo que se descontó por daño y vidas
+    const r = data.resumen;
+    if (!gano && r && (r.restaDanio || r.restaVidas)) {
+      this.add.text(480, 470, 'Daño recibido -' + r.restaDanio + '   ·   Vidas perdidas -' + r.restaVidas,
+        ESTILO(18, '#ff4f6a')).setOrigin(0.5);
+    }
     const ayuda = window.esTactil() ? 'Tocá la pantalla para volver al menú'
       : (gano ? 'ENTER: volver al menú' : 'ENTER: reintentar  ·  ESC: menú');
     this.add.text(480, 690, ayuda, ESTILO(18, '#9fb4ff')).setOrigin(0.5);

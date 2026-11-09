@@ -22,6 +22,10 @@ class EscenaNivel extends Phaser.Scene {
     this.enemigoVisto = null;
     this.enemigoVistoT = 0;
     this.boss = null;
+    // para el puntaje del nivel: cronometro, vida perdida y vidas perdidas
+    this.tiempo = 0;
+    this.danioRecibido = 0;
+    this.vidasPerdidas = 0;
 
     // la zona caminable depende del fondo de cada nivel
     J.PISO_MIN = this.nivel.pisoMin || 615;
@@ -132,6 +136,8 @@ class EscenaNivel extends Phaser.Scene {
     if (this.pausado) return;
 
     const dt = Math.min(delta / 1000, 0.05);
+    // el cronometro corre desde la primera oleada hasta que termina el nivel (no cuenta la pausa)
+    if (this.fase !== 'intro' && this.fase !== 'fin') this.tiempo += delta / 1000;
     if (this.hitStop > 0) { this.hitStop -= dt; return; }
 
     this.actualizarAngie(dt);
@@ -230,6 +236,7 @@ class EscenaNivel extends Phaser.Scene {
   angieSinVida() {
     const a = this.angie;
     this.vidas--;
+    this.vidasPerdidas++;
     if (this.vidas > 0) {
       this.anuncio('¡ARRIBA ANGIE!', '#ffd34f');
       a.hp = a.hpMax;
@@ -238,7 +245,10 @@ class EscenaNivel extends Phaser.Scene {
     } else {
       a.morir();
       this.fase = 'fin';
-      this.time.delayedCall(1800, () => this.irAFinal(false));
+      // al perder no hay premio por tiempo, pero si se descuenta el daño y las vidas
+      const r = this.calcularPuntaje(false);
+      this.puntos = r.total;
+      this.time.delayedCall(1800, () => this.irAFinal(false, r));
     }
   }
 
@@ -322,10 +332,10 @@ class EscenaNivel extends Phaser.Scene {
       b.x += b.dir * 600 * dt;
       b.spr.x = b.x;
       if (Math.abs(a.y - b.y) < 22 && Math.abs(a.x - b.x) < 28 && a.z < 60 && a.golpeable) {
-        if (!this.opc.modoDios) {
-          a.recibirGolpe(b.danio, b.dir, false);
-          a.invul = Math.max(a.invul, 0.3);
-        } else a.flash();
+        const hpAntes = a.hp;
+        a.recibirGolpe(b.danio, b.dir, false);
+        a.invul = Math.max(a.invul, 0.3);
+        this.danioRecibido += hpAntes - a.hp;
         Sonido.herida();
         b.spr.destroy();
         return false;
@@ -362,11 +372,11 @@ class EscenaNivel extends Phaser.Scene {
       const dx = (o.x - at.x) * at.dir;
       const dy = Math.abs(o.y - at.y);
       if (dx > -20 && dx < alcance && dy < 32 && Math.abs(o.z - at.z) < (alturaMax || 70)) {
-        if (o === this.angie && this.opc.modoDios) { o.flash(); Sonido.golpe(); continue; }
+        const hpAntes = o.hp;
         if (o.recibirGolpe(danio, at.dir, fuerte)) {
           golpeados.push(o);
           this.efectoGolpe(o, fuerte || o.estado === 'caido');
-          if (o === this.angie) { o.invul = Math.max(o.invul, 0.3); Sonido.herida(); }
+          if (o === this.angie) { o.invul = Math.max(o.invul, 0.3); this.danioRecibido += hpAntes - o.hp; Sonido.herida(); }
           else { this.enemigoVisto = o; this.enemigoVistoT = 2.5; }
         }
       }
@@ -410,20 +420,75 @@ class EscenaNivel extends Phaser.Scene {
     this.fase = 'fin';
     this.balas.forEach((b) => b.spr.destroy()); this.balas = [];
     const hayMas = this.numNivel + 1 < C.niveles.length;
-    this.anuncio(this.boss ? '¡K.O.!' : (C.textos.nivelSuperado || '¡NIVEL SUPERADO!'), '#ffd34f', 2000);
-    if (hayMas && this.boss) this.time.delayedCall(1500, () => this.anuncio(C.textos.nivelSuperado || '¡NIVEL SUPERADO!', '#5ff4ff', 1500));
-    this.time.delayedCall(hayMas ? 3200 : 2400, () => {
+    const r = this.calcularPuntaje(true);
+    this.anuncio(this.boss ? '¡K.O.!' : (C.textos.nivelSuperado || '¡NIVEL SUPERADO!'), '#ffd34f', 1400);
+    this.time.delayedCall(1800, () => this.mostrarResumen(r, () => {
+      this.puntos = r.total;
       if (hayMas) {
         this.cameras.main.fadeOut(500, 0, 0, 0);
         this.cameras.main.once('camerafadeoutcomplete', () =>
           this.scene.start('nivel', { nivel: this.numNivel + 1, vidas: this.vidas, puntos: this.puntos }));
       } else this.irAFinal(true);
-    });
+    }));
   }
 
-  irAFinal(gano) {
+  // Puntaje del nivel: premio por terminar rapido, menos el daño recibido y las vidas perdidas.
+  // Los valores se cambian en config-juego.js -> "puntaje" (o en el panel admin).
+  calcularPuntaje(gano) {
+    const P = Object.assign({ bonoTiempo: 5000, puntosPorSegundo: 25, porDanio: 10, porVida: 1000 },
+      window.JUEGO.config.puntaje || {});
+    const seg = Math.floor(this.tiempo);
+    const bono = gano ? Math.max(0, Math.round(P.bonoTiempo - seg * P.puntosPorSegundo)) : 0;
+    const restaDanio = Math.round(this.danioRecibido * P.porDanio);
+    const restaVidas = this.vidasPerdidas * P.porVida;
+    const total = Math.max(0, this.puntos + bono - restaDanio - restaVidas);
+    return { seg, base: this.puntos, bono, danio: Math.round(this.danioRecibido), restaDanio,
+             vidas: this.vidasPerdidas, restaVidas, total };
+  }
+
+  // Cartel con la cuenta de puntos del nivel. Sigue solo, o antes con cualquier tecla / toque.
+  mostrarResumen(r, alTerminar) {
+    const D = 9900, cont = this.add.container(0, 0).setDepth(D);
+    cont.add(this.add.rectangle(480, 360, 640, 430, 0x000000, 0.82).setStrokeStyle(4, 0xff4fd8));
+    cont.add(this.add.text(480, 180, 'RESULTADO DEL NIVEL', ESTILO(32, '#ffd34f')).setOrigin(0.5));
+    const filas = [
+      ['Puntos por enemigos', '' + r.base, '#ffffff'],
+      ['Tiempo ' + formatoTiempo(r.seg), '+' + r.bono, '#5ff4ff'],
+      ['Daño recibido (' + r.danio + ')', '-' + r.restaDanio, '#ff4f6a'],
+      ['Vidas perdidas (' + r.vidas + ')', '-' + r.restaVidas, '#ff4f6a'],
+      ['TOTAL', '' + r.total, '#ffd34f']
+    ];
+    filas.forEach((f, i) => {
+      const y = 245 + i * 56 + (i === filas.length - 1 ? 14 : 0);
+      const izq = this.add.text(200, y, f[0], ESTILO(i === filas.length - 1 ? 30 : 24, f[2])).setOrigin(0, 0.5).setAlpha(0);
+      const der = this.add.text(760, y, f[1], ESTILO(i === filas.length - 1 ? 30 : 24, f[2])).setOrigin(1, 0.5).setAlpha(0);
+      cont.add([izq, der]);
+      this.time.delayedCall(300 + i * 380, () => { izq.setAlpha(1); der.setAlpha(1); (i === filas.length - 1 ? Sonido.elegir : Sonido.menu)(); });
+    });
+    const sigue = this.add.text(480, 545, this.tactil ? 'Tocá para seguir' : 'Apretá una tecla para seguir', ESTILO(18, '#9fb4ff'))
+      .setOrigin(0.5).setAlpha(0);
+    cont.add(sigue);
+
+    let listo = false;
+    const seguir = () => {
+      if (listo) return;
+      listo = true;
+      this.input.keyboard.off('keydown', seguir);
+      this.input.off('pointerdown', seguir);
+      alTerminar();
+    };
+    const tEspera = 300 + filas.length * 380 + 400;
+    this.time.delayedCall(tEspera, () => {
+      sigue.setAlpha(1);
+      this.input.keyboard.on('keydown', seguir);
+      this.input.on('pointerdown', seguir);
+    });
+    this.time.delayedCall(tEspera + 5000, seguir);
+  }
+
+  irAFinal(gano, resumen) {
     this.cameras.main.fadeOut(500, 0, 0, 0);
-    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('final', { gano, puntos: this.puntos }));
+    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('final', { gano, puntos: this.puntos, resumen }));
   }
 
   // ---------------- Pantalla (HUD) ----------------
@@ -434,9 +499,9 @@ class EscenaNivel extends Phaser.Scene {
     this.textoVidas = this.add.text(20, 66, '', ESTILO(18, '#ffffff')).setDepth(D + 1);
     this.textoPuntos = this.add.text(940, 14, '', ESTILO(22, '#5ff4ff')).setOrigin(1, 0).setDepth(D + 1);
     this.textoOleada = this.add.text(480, 16, '', ESTILO(20, '#ffd34f')).setOrigin(0.5, 0).setDepth(D + 1);
+    this.textoTiempo = this.add.text(480, 46, '', ESTILO(18, '#ffffff')).setOrigin(0.5, 0).setDepth(D + 1);
     this.textoEnemigo = this.add.text(940, 48, '', ESTILO(16, '#ffffff')).setOrigin(1, 0).setDepth(D + 1);
     this.textoBoss = this.add.text(480, 655, '', ESTILO(20, '#ff4f6a')).setOrigin(0.5, 1).setDepth(D + 1).setVisible(false);
-    if (this.opc.modoDios) this.add.text(20, 92, 'MODO DIOS', ESTILO(14, '#ffd34f')).setDepth(D + 1);
     const comoSeguir = this.tactil ? 'Tocá II para seguir' : nombreTecla((this.opc.controles || JUEGO.CONTROLES_DEFECTO).pausa[0]) + ' para seguir';
     this.textoPausa = this.add.text(480, 330, 'PAUSA\n\n' + comoSeguir, ESTILO(40)).setOrigin(0.5).setDepth(D + 2).setVisible(false);
   }
@@ -453,6 +518,7 @@ class EscenaNivel extends Phaser.Scene {
     this.barra(20, 42, 260, 16, a.hp / a.hpMax, a.hp / a.hpMax > 0.3 ? 0xff4fd8 : 0xff4f4f);
     this.textoVidas.setText('♥ x ' + Math.max(0, this.vidas));
     this.textoPuntos.setText('PUNTOS ' + this.puntos);
+    this.textoTiempo.setText('TIEMPO ' + formatoTiempo(this.tiempo));
     const nv = 'NIVEL ' + (this.numNivel + 1) + '  ·  ';
     this.textoOleada.setText(nv + (this.boss ? 'JEFE FINAL' : (this.oleada ? 'OLEADA ' + this.oleada + ' / ' + this.nivel.oleadas.length : '')));
 

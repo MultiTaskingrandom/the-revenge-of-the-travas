@@ -39,5 +39,11 @@ window.CONFIG_JUEGO = {
     "derrota": "Los turros ganaron esta noche...\npero Angie no se rinde.",
     "nivelSuperado": "¡NIVEL SUPERADO!"
   },
+  "puntaje": {
+    "bonoTiempo": 5000,
+    "puntosPorSegundo": 25,
+    "porDanio": 10,
+    "porVida": 1000
+  },
   "fondosExtra": {}
 };
