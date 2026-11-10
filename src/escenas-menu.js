@@ -13,12 +13,13 @@ function formatoTiempo(seg) {
 function controlesDefecto() { return JSON.parse(JSON.stringify(window.JUEGO.CONTROLES_DEFECTO)); }
 
 function leerOpciones() {
-  let o = { vidas: 3, personaje: 'angie', controles: controlesDefecto() };
+  let o = { vidas: 3, personaje: 'angie', fuegoAmigo: false, controles: controlesDefecto() };
   try {
     const g = JSON.parse(localStorage.getItem('trav_opciones'));
     if (g) {
       o.vidas = g.vidas || o.vidas;
       if (window.JUEGO.JUGABLES.includes(g.personaje)) o.personaje = g.personaje;
+      o.fuegoAmigo = !!g.fuegoAmigo;
       if (g.controles) for (const acc in o.controles) if (Array.isArray(g.controles[acc])) o.controles[acc] = g.controles[acc];
     }
   } catch (e) {}
@@ -131,9 +132,11 @@ class EscenaMenu extends Phaser.Scene {
       this.ayuda.setText(this.tactil ? 'Tocá una opción para cambiarla' : '◀ ▶ cambian el valor  ·  ESC vuelve');
       this.items.push(this.add.text(480, 448, 'OPCIONES', ESTILO(26, '#ffd34f')).setOrigin(0.5));
       // en celular no se muestra "CONTROLES" (son para teclado)
-      this.ids = this.tactil ? ['vidas', 'volver'] : ['vidas', 'controles', 'volver'];
+      this.ids = this.tactil ? ['vidas', 'fuego', 'volver'] : ['vidas', 'fuego', 'controles', 'volver'];
       const textos = {
         vidas: 'VIDAS:  ◀ ' + this.opc.vidas + ' ▶',
+        // fuego amigo: de a 2, las piñas y patadas también lastiman al compañero
+        fuego: 'FUEGO AMIGO:  ◀ ' + (this.opc.fuegoAmigo ? 'SÍ' : 'NO') + ' ▶',
         controles: 'CONTROLES',
         volver: 'VOLVER'
       };
@@ -214,7 +217,7 @@ class EscenaMenu extends Phaser.Scene {
       if (id === 'vidas') {
         // con el dedo (circular) da la vuelta: 1, 2, ... 9, 1
         this.opc.vidas = circular ? (this.opc.vidas % 9) + 1 : Phaser.Math.Clamp(this.opc.vidas + d, 1, 9);
-      }
+      } else if (id === 'fuego') this.opc.fuegoAmigo = !this.opc.fuegoAmigo;
       else return;
       guardarOpciones(this.opc);
       Sonido.menu();
@@ -425,6 +428,7 @@ class EscenaSala extends Phaser.Scene {
   constructor() { super('sala'); }
   create(data) {
     this.yendo = false;
+    this.fuego = false;
     const C = window.JUEGO.config;
     const nombre = (t) => C.personajes[t].nombre;
     fondoEstrellas(this);
@@ -456,7 +460,7 @@ class EscenaSala extends Phaser.Scene {
         this.tweens.add({ targets: this.codigoTxt, scale: 1.08, duration: 500, yoyo: true, repeat: -1 });
       }, () => {
         this.texto.setText('¡Se unió alguien! Conectando...');
-        RED.enviar({ t: 'hola', anfitrion: mio, invitado: otro });
+        RED.enviar({ t: 'hola', anfitrion: mio, invitado: otro, fuego: !!this.opc().fuegoAmigo });
       }, error);
       RED.oyente = (m) => { if (m.t === 'listo') this.conectados(mio, otro, true); };
     } else {
@@ -466,6 +470,7 @@ class EscenaSala extends Phaser.Scene {
         if (m.t === 'lleno') error('Esa partida ya tiene 2 jugadores.');
         else if (m.t === 'hola') {
           this.registry.set('personaje', m.invitado);
+          this.fuego = !!m.fuego;
           this.conectados(m.anfitrion, m.invitado, false);
           RED.enviar({ t: 'listo' });
         } else if (m.t === 'empezar') this.irAlNivel(m.tipos);
@@ -481,7 +486,9 @@ class EscenaSala extends Phaser.Scene {
     this.titCodigo.setText(''); this.codigoTxt.setText('¡CONECTADOS!').setFontSize(64);
     this.tweens.killTweensOf(this.codigoTxt); this.codigoTxt.setScale(1);
     const yo = soyAnfitrion ? anf : inv;
-    this.texto.setText('Vas a jugar con ' + C.personajes[yo].nombre + '\n\n¡Prepárense!');
+    const fuego = soyAnfitrion ? !!this.opc().fuegoAmigo : this.fuego;
+    this.texto.setText('Vas a jugar con ' + C.personajes[yo].nombre +
+      '\nFuego amigo: ' + (fuego ? 'SÍ (¡cuidado con pegarle a tu compañera!)' : 'NO') + '\n\n¡Prepárense!');
     imagenPersonaje(this, anf, 140, 620, 200);
     imagenPersonaje(this, inv, 820, 620, 200).setFlipX(true);
     if (soyAnfitrion) {
@@ -492,6 +499,8 @@ class EscenaSala extends Phaser.Scene {
       });
     }
   }
+
+  opc() { return this.registry.get('opciones') || leerOpciones(); }
 
   irAlNivel(tipos) {
     if (this.yendo) return;

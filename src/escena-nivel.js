@@ -76,6 +76,8 @@ class EscenaNivel extends Phaser.Scene {
       this.jugadores.push(j);
     });
 
+    // fuego amigo: solo tiene sentido de a 2
+    this.fuegoAmigo = !!this.opc.fuegoAmigo && this.jugadores.length > 1;
     if (this.red === 'anfitrion') this.prepararAnfitrion();
     this.crearHUD(this.jugadores.map((j) => j.tipo));
     this.anuncio(titulo, '#ff4fd8', 1600, null, true);   // el invitado muestra el suyo
@@ -403,13 +405,20 @@ class EscenaNivel extends Phaser.Scene {
         a.yaPateo = true; a.pateaAire = true; a.pose('patada'); Sonido.aire();
       }
       if (a.pateaAire) {
-        const blancos = this.enemigos.filter((e) => !a.golpeadosAire.includes(e));
+        const blancos = this.blancos(a).filter((e) => !a.golpeadosAire.includes(e));
         const pego = this.golpear(a, blancos, 115, P.patadaAire, true, 150);
         pego.forEach((e) => a.golpeadosAire.push(e));
       }
     } else if (a.estado === 'ataque') {
       this.secuencia(a, dt);
     }
+  }
+
+  // A quien le puede pegar un jugador: los enemigos y, con FUEGO AMIGO (opcion del que creo la partida),
+  // tambien al otro jugador
+  blancos(a) {
+    if (!this.fuegoAmigo) return this.enemigos;
+    return this.enemigos.concat(this.jugadores.filter((j) => j !== a && !j.fuera));
   }
 
   ataqueJugador(a, tipo) {
@@ -421,7 +430,7 @@ class EscenaNivel extends Phaser.Scene {
       a.combo = 0;
       this.iniciarSecuencia(a, [
         { p: 'punio1', d: 0.07 },
-        { p: 'patada', d: 0.24, golpe: () => this.golpear(a, this.enemigos, 118, P.patada, true) },
+        { p: 'patada', d: 0.24, golpe: () => this.golpear(a, this.blancos(a), 118, P.patada, true) },
         { p: 'parado', d: 0.06 }
       ]);
       return;
@@ -432,14 +441,14 @@ class EscenaNivel extends Phaser.Scene {
       a.combo = 0;
       this.iniciarSecuencia(a, [
         { p: 'punio1', d: 0.08 },
-        { p: 'punio3', d: 0.2, golpe: () => this.golpear(a, this.enemigos, 108, P.remate, true) },
+        { p: 'punio3', d: 0.2, golpe: () => this.golpear(a, this.blancos(a), 108, P.remate, true) },
         { p: 'punio2', d: 0.08 }
       ]);
     } else {
       this.iniciarSecuencia(a, [
         { p: 'punio1', d: 0.04 },
         { p: 'punio2', d: 0.04 },
-        { p: 'punio3', d: 0.12, golpe: () => this.golpear(a, this.enemigos, 100, P.punio, false) },
+        { p: 'punio3', d: 0.12, golpe: () => this.golpear(a, this.blancos(a), 100, P.punio, false) },
         { p: 'punio2', d: 0.05 }
       ]);
     }
