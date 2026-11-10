@@ -13,11 +13,12 @@ function formatoTiempo(seg) {
 function controlesDefecto() { return JSON.parse(JSON.stringify(window.JUEGO.CONTROLES_DEFECTO)); }
 
 function leerOpciones() {
-  let o = { vidas: 3, controles: controlesDefecto() };
+  let o = { vidas: 3, personaje: 'angie', controles: controlesDefecto() };
   try {
     const g = JSON.parse(localStorage.getItem('trav_opciones'));
     if (g) {
       o.vidas = g.vidas || o.vidas;
+      if (window.JUEGO.JUGABLES.includes(g.personaje)) o.personaje = g.personaje;
       if (g.controles) for (const acc in o.controles) if (Array.isArray(g.controles[acc])) o.controles[acc] = g.controles[acc];
     }
   } catch (e) {}
@@ -74,6 +75,7 @@ class EscenaMenu extends Phaser.Scene {
   constructor() { super('menu'); }
 
   create() {
+    RED.cerrar();   // al volver al menu se corta cualquier partida online
     this.opc = leerOpciones();
     fondoEstrellas(this);
     this.titulo = this.add.image(480, 20, 'fondoinicio').setOrigin(0.5, 0);
@@ -118,8 +120,13 @@ class EscenaMenu extends Phaser.Scene {
 
     if (this.modo === 'principal') {
       this.ayuda.setText(this.tactil ? 'Tocá una opción' : 'Flechas para elegir  ·  ENTER para aceptar');
-      this.ids = ['start', 'opciones'];
-      this.crearOpciones(['START', 'OPCIONES'], 500, 58, 40);
+      this.ids = ['solo', 'dea2', 'opciones'];
+      this.crearOpciones(['UN JUGADOR', 'DE A 2 (ONLINE)', 'OPCIONES'], 488, 56, 36);
+    } else if (this.modo === 'dea2') {
+      this.ayuda.setText(this.tactil ? 'Tocá una opción' : 'Flechas para elegir  ·  ENTER para aceptar  ·  ESC vuelve');
+      this.items.push(this.add.text(480, 448, 'DE A 2 · CADA UNO EN SU CELULAR O COMPU', ESTILO(20, '#ffd34f')).setOrigin(0.5));
+      this.ids = ['crear', 'unirse', 'volver'];
+      this.crearOpciones(['CREAR PARTIDA', 'UNIRME CON CÓDIGO', 'VOLVER'], 500, 54, 32);
     } else if (this.modo === 'opciones') {
       this.ayuda.setText(this.tactil ? 'Tocá una opción para cambiarla' : '◀ ▶ cambian el valor  ·  ESC vuelve');
       this.items.push(this.add.text(480, 448, 'OPCIONES', ESTILO(26, '#ffd34f')).setOrigin(0.5));
@@ -220,7 +227,8 @@ class EscenaMenu extends Phaser.Scene {
   }
 
   volver() {
-    if (this.modo === 'opciones') { this.modo = 'principal'; this.sel = 1; }
+    if (this.modo === 'opciones') { this.modo = 'principal'; this.sel = 2; }
+    else if (this.modo === 'dea2') { this.modo = 'principal'; this.sel = 1; }
     else if (this.modo === 'controles') { this.modo = 'opciones'; this.sel = 2; }
     else return;
     Sonido.menu();
@@ -229,15 +237,19 @@ class EscenaMenu extends Phaser.Scene {
 
   aceptar(conMouse) {
     Sonido.activar();
+    const id = this.ids && this.ids[this.sel];
     if (this.modo === 'principal') {
-      if (this.sel === 0) {
-        Sonido.elegir();
-        this.registry.set('opciones', this.opc);
-        this.cameras.main.fadeOut(400, 0, 0, 0);
-        this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('historia'));
-      } else {
-        this.modo = 'opciones'; this.sel = 0; Sonido.menu(); this.armarMenu();
-      }
+      if (id === 'solo') this.irA('elegir', { modo: 'solo' });
+      else if (id === 'dea2') { this.modo = 'dea2'; this.sel = 0; Sonido.menu(); this.armarMenu(); }
+      else { this.modo = 'opciones'; this.sel = 0; Sonido.menu(); this.armarMenu(); }
+    } else if (this.modo === 'dea2') {
+      if (id === 'crear') this.irA('elegir', { modo: 'anfitrion' });
+      else if (id === 'unirse') {
+        // el codigo se escribe en una ventanita del navegador (anda igual en compu y en celular)
+        const codigo = (window.prompt('Escribí el código de 4 números que te pasaron:') || '').replace(/\D/g, '');
+        if (codigo.length === 4) this.irA('sala', { rol: 'invitado', codigo });
+        else if (codigo) Sonido.herida();
+      } else this.volver();
     } else if (this.modo === 'opciones') {
       const id = this.ids[this.sel];
       if (id === 'controles') { this.modo = 'controles'; this.sel = 0; this.col = 0; Sonido.menu(); this.armarMenu(); }
@@ -250,6 +262,13 @@ class EscenaMenu extends Phaser.Scene {
         this.opc.controles = controlesDefecto(); guardarOpciones(this.opc); Sonido.elegir(); this.armarMenu();
       } else this.volver();
     }
+  }
+
+  irA(escena, datos) {
+    Sonido.elegir();
+    this.registry.set('opciones', this.opc);
+    this.cameras.main.fadeOut(400, 0, 0, 0);
+    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start(escena, datos));
   }
 
   // Espera la proxima tecla y la asigna a la accion (columna this.col)
@@ -319,18 +338,196 @@ class EscenaHistoria extends Phaser.Scene {
   }
 }
 
+// Imagen "parado" de un personaje jugable, con los pies en (x, y) y el cuerpo de "alto" pixeles
+function imagenPersonaje(scene, tipo, x, y, alto) {
+  const m = window.SPRITE_META[tipo];
+  return scene.add.image(x, y, tipo + '_parado').setOrigin(m.parado.foot / m.parado.w, 1).setScale(alto / (m._refH || m.parado.h));
+}
+
+// Cambia "Angie" por el/los personajes que jugaron (ej. "LULA" o "ANGIE Y LULA") en los textos de final
+function textoConNombres(texto, tipos) {
+  if (tipos.length === 1 && tipos[0] === 'angie') return texto;
+  const may = nombresJugadores(tipos);
+  const tit = may.toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase()).replace(' Y ', ' y ');
+  texto = texto.replace(/ANGIE/g, may).replace(/Angie/g, tit);
+  if (tipos.length > 1) {
+    // de a 2: "ganaste" -> "ganaron", "vas a" -> "van a", "no se rinde" -> "no se rinden"
+    texto = texto.replace(/GANASTE/g, 'GANARON').replace(/ganaste/g, 'ganaron')
+      .replace(/\bVas a\b/g, 'Van a').replace(/\bvas a\b/g, 'van a').replace(/no se rinde\b/g, 'no se rinden');
+  }
+  return texto;
+}
+
+// Elegir personaje (un jugador, o el anfitrion antes de crear la partida online)
+class EscenaElegir extends Phaser.Scene {
+  constructor() { super('elegir'); }
+  create(data) {
+    this.modo = data.modo;                         // 'solo' | 'anfitrion'
+    this.opc = this.registry.get('opciones') || leerOpciones();
+    this.tipos = window.JUEGO.JUGABLES;
+    this.sel = Math.max(0, this.tipos.indexOf(this.opc.personaje));
+    this.yendo = false;
+    fondoEstrellas(this);
+    this.cameras.main.fadeIn(300);
+    this.add.text(480, 56, 'ELEGÍ TU PERSONAJE', ESTILO(40, '#ffd34f')).setOrigin(0.5);
+    if (this.modo === 'anfitrion') this.add.text(480, 104, 'La otra persona va a jugar con el otro personaje', ESTILO(18, '#9fb4ff')).setOrigin(0.5);
+    this.cartas = this.tipos.map((t, i) => {
+      const x = 300 + i * 360;
+      const marco = this.add.rectangle(x, 380, 300, 440, 0xffffff, 0.06).setInteractive({ useHandCursor: true });
+      const img = imagenPersonaje(this, t, x, 560, 250);
+      const nombre = this.add.text(x, 615, window.JUEGO.config.personajes[t].nombre, ESTILO(34, COLOR_JUGADOR[t] || '#ffffff')).setOrigin(0.5, 0.5);
+      marco.on('pointerover', () => { this.sel = i; this.marcar(); });
+      marco.on('pointerdown', () => { this.sel = i; this.marcar(); this.aceptar(); });
+      return { marco, img, nombre, escala: img.scale };
+    });
+    const tactil = window.esTactil();
+    this.add.text(480, 690, tactil ? 'Tocá un personaje' : '◀ ▶ elegir  ·  ENTER aceptar  ·  ESC volver', ESTILO(16, '#9fb4ff')).setOrigin(0.5);
+    const k = this.input.keyboard;
+    k.on('keydown-LEFT', () => this.mover(-1));
+    k.on('keydown-RIGHT', () => this.mover(1));
+    k.on('keydown-A', () => this.mover(-1));
+    k.on('keydown-D', () => this.mover(1));
+    k.on('keydown-ENTER', () => this.aceptar());
+    k.on('keydown-SPACE', () => this.aceptar());
+    k.on('keydown-ESC', () => { if (!this.yendo) this.scene.start('menu'); });
+    this.marcar();
+  }
+  mover(d) {
+    this.sel = (this.sel + d + this.tipos.length) % this.tipos.length;
+    Sonido.menu();
+    this.marcar();
+  }
+  marcar() {
+    this.cartas.forEach((c, i) => {
+      const si = i === this.sel;
+      c.marco.setStrokeStyle(si ? 5 : 3, si ? 0xff4fd8 : 0x5ff4ff, si ? 1 : 0.35);
+      c.img.setScale(c.escala * (si ? 1.06 : 1)).setAlpha(si ? 1 : 0.55);
+      c.nombre.setAlpha(si ? 1 : 0.55);
+    });
+  }
+  aceptar() {
+    if (this.yendo) return;
+    this.yendo = true;
+    const tipo = this.tipos[this.sel];
+    this.opc.personaje = tipo;
+    guardarOpciones(this.opc);
+    this.registry.set('opciones', this.opc);
+    this.registry.set('personaje', tipo);
+    Sonido.elegir();
+    this.cameras.main.fadeOut(400, 0, 0, 0);
+    this.cameras.main.once('camerafadeoutcomplete', () =>
+      this.scene.start(this.modo === 'solo' ? 'historia' : 'sala', { rol: 'anfitrion' }));
+  }
+}
+
+// Sala de espera del juego online: el anfitrion muestra el codigo, el invitado se conecta con ese codigo
+class EscenaSala extends Phaser.Scene {
+  constructor() { super('sala'); }
+  create(data) {
+    this.yendo = false;
+    const C = window.JUEGO.config;
+    const nombre = (t) => C.personajes[t].nombre;
+    fondoEstrellas(this);
+    this.cameras.main.fadeIn(300);
+    this.add.text(480, 70, 'DE A 2 (ONLINE)', ESTILO(40, '#ffd34f')).setOrigin(0.5);
+    this.titCodigo = this.add.text(480, 165, '', ESTILO(24, '#9fb4ff')).setOrigin(0.5);
+    this.codigoTxt = this.add.text(480, 240, '', ESTILO(96, '#5ff4ff')).setOrigin(0.5);
+    this.texto = this.add.text(480, 440, '', ESTILO(24)).setOrigin(0.5).setWordWrapWidth(880);
+    const volver = this.add.text(480, 650, 'VOLVER', ESTILO(30, '#5ff4ff')).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    volver.on('pointerdown', () => this.salir());
+    this.input.keyboard.on('keydown-ESC', () => this.salir());
+
+    const error = (msg) => {
+      if (this.yendo) return;
+      RED.cerrar();
+      Sonido.herida();
+      this.titCodigo.setText(''); this.codigoTxt.setText('');
+      this.texto.setColor('#ff4f6a').setText(msg + '\n\nTocá VOLVER para ir al menú.');
+    };
+
+    if (data.rol === 'anfitrion') {
+      const mio = this.registry.get('personaje') || 'angie';
+      const otro = mio === 'angie' ? 'lula' : 'angie';
+      this.texto.setText('Creando partida...');
+      RED.crear((codigo) => {
+        this.titCodigo.setText('TU CÓDIGO');
+        this.codigoTxt.setText(codigo);
+        this.texto.setText('Pasale este código a la otra persona: tiene que entrar a\nDE A 2 (ONLINE) → UNIRME CON CÓDIGO\n\nVos: ' + nombre(mio) + '   ·   La otra persona: ' + nombre(otro) + '\n\nEsperando que se una...');
+        this.tweens.add({ targets: this.codigoTxt, scale: 1.08, duration: 500, yoyo: true, repeat: -1 });
+      }, () => {
+        this.texto.setText('¡Se unió alguien! Conectando...');
+        RED.enviar({ t: 'hola', anfitrion: mio, invitado: otro });
+      }, error);
+      RED.oyente = (m) => { if (m.t === 'listo') this.conectados(mio, otro, true); };
+    } else {
+      this.texto.setText('Conectando a la partida ' + data.codigo + '...');
+      RED.unirse(data.codigo, () => { this.texto.setText('Conectado. Esperando...'); }, error);
+      RED.oyente = (m) => {
+        if (m.t === 'lleno') error('Esa partida ya tiene 2 jugadores.');
+        else if (m.t === 'hola') {
+          this.registry.set('personaje', m.invitado);
+          this.conectados(m.anfitrion, m.invitado, false);
+          RED.enviar({ t: 'listo' });
+        } else if (m.t === 'empezar') this.irAlNivel(m.tipos);
+      };
+    }
+    RED.alCortarse = () => error('Se cortó la conexión.');
+  }
+
+  // tipos = [anfitrion, invitado]
+  conectados(anf, inv, soyAnfitrion) {
+    const C = window.JUEGO.config;
+    Sonido.victoria();
+    this.titCodigo.setText(''); this.codigoTxt.setText('¡CONECTADOS!').setFontSize(64);
+    this.tweens.killTweensOf(this.codigoTxt); this.codigoTxt.setScale(1);
+    const yo = soyAnfitrion ? anf : inv;
+    this.texto.setText('Vas a jugar con ' + C.personajes[yo].nombre + '\n\n¡Prepárense!');
+    imagenPersonaje(this, anf, 140, 620, 200);
+    imagenPersonaje(this, inv, 820, 620, 200).setFlipX(true);
+    if (soyAnfitrion) {
+      this.time.delayedCall(2500, () => {
+        if (!RED.activa()) return;
+        RED.enviar({ t: 'empezar', tipos: [anf, inv] });
+        this.irAlNivel([anf, inv]);
+      });
+    }
+  }
+
+  irAlNivel(tipos) {
+    if (this.yendo) return;
+    this.yendo = true;
+    this.cameras.main.fadeOut(400, 0, 0, 0);
+    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('nivel', { nivel: 0, tipos }));
+  }
+
+  salir() {
+    if (this.yendo) return;
+    RED.cerrar();
+    this.scene.start('menu');
+  }
+}
+
 class EscenaFinal extends Phaser.Scene {
   constructor() { super('final'); }
   create(data) {
     const T = window.JUEGO.config.textos;
     const gano = data.gano;
+    const tipos = data.tipos || [this.registry.get('personaje') || 'angie'];
+    const coop = !!data.coop;
+    // la partida online termina aca: si el otro se va, no pasa nada
+    RED.oyente = null;
+    RED.alCortarse = null;
     this.add.image(480, 0, 'fondojugando').setOrigin(0.5, 0);
     this.add.rectangle(480, 360, 960, 720, 0x000000, gano ? 0.45 : 0.7);
     if (gano) {
       Sonido.victoria();
-      const angie = this.add.image(480, 640, 'angie_parado').setOrigin(0.5, 1).setScale(0.75);
-      this.tweens.add({ targets: angie, y: 620, duration: 350, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-      const t = this.add.text(480, 170, T.victoria, ESTILO(38, '#ffd34f')).setOrigin(0.5);
+      tipos.forEach((t, i) => {
+        const x = tipos.length > 1 ? 380 + i * 200 : 480;
+        const img = imagenPersonaje(this, t, x, 640, 190);
+        if (i === 1) img.setFlipX(true);
+        this.tweens.add({ targets: img, y: 620, duration: 350, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: i * 175 });
+      });
+      const t = this.add.text(480, 170, textoConNombres(T.victoria, tipos), ESTILO(38, '#ffd34f')).setOrigin(0.5);
       t.setWordWrapWidth(900);
       this.tweens.add({ targets: t, scale: 1.05, duration: 600, yoyo: true, repeat: -1 });
       for (let i = 0; i < 70; i++) {
@@ -341,7 +538,7 @@ class EscenaFinal extends Phaser.Scene {
     } else {
       Sonido.derrota();
       this.add.text(480, 280, 'GAME OVER', ESTILO(72, '#ff4f6a')).setOrigin(0.5);
-      this.add.text(480, 370, T.derrota, ESTILO(24)).setOrigin(0.5).setWordWrapWidth(900);
+      this.add.text(480, 370, textoConNombres(T.derrota, tipos), ESTILO(24)).setOrigin(0.5).setWordWrapWidth(900);
     }
     this.add.text(480, 270 + (gano ? 0 : 160), 'PUNTOS: ' + (data.puntos || 0), ESTILO(26, '#5ff4ff')).setOrigin(0.5);
     // al perder, se muestra lo que se descontó por daño y vidas
@@ -350,11 +547,13 @@ class EscenaFinal extends Phaser.Scene {
       this.add.text(480, 470, 'Daño recibido -' + r.restaDanio + '   ·   Vidas perdidas -' + r.restaVidas,
         ESTILO(18, '#ff4f6a')).setOrigin(0.5);
     }
+    // de a 2 no se puede reintentar directo (hay que volver a armar la partida)
+    const reintentar = !gano && !coop;
     const ayuda = window.esTactil() ? 'Tocá la pantalla para volver al menú'
-      : (gano ? 'ENTER: volver al menú' : 'ENTER: reintentar  ·  ESC: menú');
+      : (reintentar ? 'ENTER: reintentar  ·  ESC: menú' : 'ENTER: volver al menú');
     this.add.text(480, 690, ayuda, ESTILO(18, '#9fb4ff')).setOrigin(0.5);
     this.time.delayedCall(800, () => {
-      this.input.keyboard.on('keydown-ENTER', () => this.scene.start(gano ? 'menu' : 'nivel', { nivel: 0 }));
+      this.input.keyboard.on('keydown-ENTER', () => this.scene.start(reintentar ? 'nivel' : 'menu', { nivel: 0 }));
       this.input.keyboard.on('keydown-ESC', () => this.scene.start('menu'));
       this.input.on('pointerdown', () => this.scene.start('menu'));
     });

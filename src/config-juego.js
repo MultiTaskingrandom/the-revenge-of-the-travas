@@ -4,6 +4,8 @@ window.CONFIG_JUEGO = {
   "personajes": {
     "angie": { "nombre": "ANGIE", "alto": 165, "hp": 100, "vel": 240, "velY": 150, "salto": 640,
                "punio": 10, "remate": 16, "patada": 14, "patadaAire": 18 },
+    "lula": { "nombre": "LULA", "alto": 165, "hp": 100, "vel": 240, "velY": 150, "salto": 640,
+              "punio": 10, "remate": 16, "patada": 14, "patadaAire": 18 },
     "turro1": { "nombre": "TURRO", "alto": 160, "hp": 50, "vel": 120, "velY": 85, "punio": 7, "patada": 9,
                 "esperaMin": 0.9, "esperaMax": 1.7, "alcance": 100, "puntos": 100, "dispara": false, "bala": 10 },
     "turro2": { "nombre": "TURRO", "alto": 160, "hp": 50, "vel": 120, "velY": 85, "punio": 7, "patada": 9,
@@ -44,6 +46,9 @@ window.CONFIG_JUEGO = {
     "puntosPorSegundo": 25,
     "porDanio": 10,
     "porVida": 1000
+  },
+  "cooperativo": {
+    "vidaEnemigos": 1.5
   },
   "fondosExtra": {}
 };

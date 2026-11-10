@@ -13,6 +13,8 @@ window.JUEGO = {
 
   // Tipos de personaje que existen (cada uno tiene su hoja de sprites)
   TIPOS_ENEMIGO: ['turro1', 'turro2', 'bossfinal'],
+  // Personajes que puede usar el jugador
+  JUGABLES: ['angie', 'lula'],
 
   // Controles por defecto: dos teclas por accion (codigos de teclado; 0 = sin tecla)
   CONTROLES_DEFECTO: {
@@ -37,6 +39,9 @@ window.JUEGO.config = (function () {
   if (/[?&]prueba/.test(location.search)) {
     try { const p = JSON.parse(localStorage.getItem('trav_config_prueba')); if (p) c = p; } catch (e) {}
   }
+  // Configuraciones viejas (sin Lula o sin "cooperativo"): se completan con valores por defecto
+  if (!c.personajes.lula) c.personajes.lula = Object.assign({}, c.personajes.angie, { nombre: 'LULA' });
+  c.cooperativo = Object.assign({ vidaEnemigos: 1.5 }, c.cooperativo || {});
   return c;
 })();
 

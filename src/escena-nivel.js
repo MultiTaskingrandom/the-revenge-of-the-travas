@@ -1,20 +1,33 @@
 // Escena de un nivel: oleadas de enemigos y jefe, segun src/config-juego.js (niveles[]).
+// Sirve para 1 jugador y para el cooperativo online (ver src/red.js):
+//  - un jugador / anfitrion: el juego corre aca.
+//  - invitado: no simula nada, dibuja lo que le manda el anfitrion ("espejo") y le manda sus teclas.
+const COLOR_JUGADOR = { angie: '#ff4fd8', lula: '#ffd34f' };
+const ENVIOS_POR_SEG = 20;
+
+// nombre para los carteles (ej. "ANGIE" o "ANGIE Y LULA")
+function nombresJugadores(tipos) {
+  return tipos.map((t) => (window.JUEGO.config.personajes[t] || {}).nombre || t.toUpperCase()).join(' Y ');
+}
+
 class EscenaNivel extends Phaser.Scene {
   constructor() { super('nivel'); }
 
-  // data: { nivel, vidas, puntos }  (vidas/puntos vienen del nivel anterior)
+  // data: { nivel, puntos, jugadores: [{tipo, vidas}] }  (vienen del nivel anterior)
   create(data) {
     const J = window.JUEGO, C = J.config;
     data = data || {};
     this.opc = this.registry.get('opciones') || leerOpciones();
+    this.red = RED.rol;                       // null | 'anfitrion' | 'invitado'
+    this.esInvitado = this.red === 'invitado';
     this.numNivel = data.nivel || 0;
     this.nivel = C.niveles[this.numNivel];
-    this.vidas = data.vidas !== undefined ? data.vidas : this.opc.vidas;
     this.puntos = data.puntos || 0;
     this.oleada = 0;
     this.fase = 'intro';          // intro | oleada | esperando | boss | fin
     this.enemigos = [];
     this.balas = [];
+    this.jugadores = [];
     this.pendientes = 0;
     this.hitStop = 0;
     this.pausado = false;
@@ -22,6 +35,7 @@ class EscenaNivel extends Phaser.Scene {
     this.enemigoVisto = null;
     this.enemigoVistoT = 0;
     this.boss = null;
+    this.idSiguiente = 1;
     // para el puntaje del nivel: cronometro, vida perdida y vidas perdidas
     this.tiempo = 0;
     this.danioRecibido = 0;
@@ -34,19 +48,49 @@ class EscenaNivel extends Phaser.Scene {
     const fondo = this.textures.exists(this.nivel.fondo) ? this.nivel.fondo : 'fondojugando';
     this.add.image(480, 0, fondo).setOrigin(0.5, 0).setDisplaySize(960, 960 * this.textures.get(fondo).getSourceImage().height / this.textures.get(fondo).getSourceImage().width).setDepth(-1000);
 
-    const P = C.personajes.angie;
-    const a = this.angie = new Luchador(this, 'angie', 260, (J.PISO_MIN + J.PISO_MAX) / 2, { alto: P.alto, hp: P.hp, dir: 1 });
-    a.combo = 0; a.ultimoPunio = -10;
-    a.alQuedarSinVida = () => this.angieSinVida();
-
     this.armarControles();
     this.tactil = window.esTactil() ? new ControlesTactiles(this) : null;
-    this.crearHUD();
     this.cameras.main.fadeIn(400);
     const titulo = 'NIVEL ' + (this.numNivel + 1) + '\n' + this.nivel.nombre.toUpperCase();
-    this.anuncio(titulo, '#ff4fd8', 1600);
+
+    if (this.esInvitado) {
+      this.crearHUD(data.tipos || ['angie', 'lula']);
+      this.anuncio(titulo, '#ff4fd8', 1600, null, true);
+      this.prepararEspejo();
+      return;
+    }
+
+    // ---- jugadores (1, o 2 en el cooperativo) ----
+    const lista = data.jugadores || this.jugadoresIniciales();
+    lista.forEach((d, i) => {
+      const P = C.personajes[d.tipo];
+      const y = (J.PISO_MIN + J.PISO_MAX) / 2 + (lista.length > 1 ? (i === 0 ? -18 : 18) : 0);
+      const j = new Luchador(this, d.tipo, 260 - i * 90, y, { alto: P.alto, hp: P.hp, dir: 1 });
+      j.esJugador = true;
+      j.cfg = P;
+      j.vidas = d.vidas > 0 ? d.vidas : 1;   // si quedo afuera en el nivel anterior, vuelve con 1 vida
+      j.remoto = !!d.remoto;
+      j.control = j.remoto ? this.entradaRemota() : this.entradaLocal();
+      j.combo = 0; j.ultimoPunio = -10;
+      j.alQuedarSinVida = () => this.jugadorSinVida(j);
+      this.jugadores.push(j);
+    });
+
+    if (this.red === 'anfitrion') this.prepararAnfitrion();
+    this.crearHUD(this.jugadores.map((j) => j.tipo));
+    this.anuncio(titulo, '#ff4fd8', 1600, null, true);   // el invitado muestra el suyo
     if (this.nivel.intro) this.time.delayedCall(1900, () => this.anuncio(this.nivel.intro, '#ffffff', 1800, 30));
     this.time.delayedCall(this.nivel.intro ? 4000 : 2100, () => this.siguientePaso());
+  }
+
+  jugadoresIniciales() {
+    const elegido = this.registry.get('personaje') || 'angie';
+    const v = this.opc.vidas;
+    if (this.red === 'anfitrion') {
+      const otro = elegido === 'angie' ? 'lula' : 'angie';
+      return [{ tipo: elegido, vidas: v }, { tipo: otro, vidas: v, remoto: true }];
+    }
+    return [{ tipo: elegido, vidas: v }];
   }
 
   // ---------------- Controles ----------------
@@ -73,6 +117,165 @@ class EscenaNivel extends Phaser.Scene {
     const r = !!this.buffer[acc] || t;
     this.buffer[acc] = false;
     return r;
+  }
+  // Control del jugador de este dispositivo (teclado o pantalla tactil)
+  entradaLocal() {
+    return { apretada: (a) => this.apretada(a), recienApretada: (a) => this.recienApretada(a) };
+  }
+  // Control del invitado: lo que llega por internet
+  entradaRemota() {
+    const e = this.remota = { dir: {}, buffer: {} };
+    return {
+      apretada: (a) => !!e.dir[a],
+      recienApretada: (a) => { const r = !!e.buffer[a]; e.buffer[a] = false; return r; }
+    };
+  }
+
+  // ---------------- Cooperativo: anfitrion ----------------
+  prepararAnfitrion() {
+    RED.enJuego = true;
+    this.envioT = 0;
+    RED.oyente = (m) => {
+      if (!this.remota) return;
+      if (m.t === 'in') {
+        ['izquierda', 'derecha', 'arriba', 'abajo'].forEach((a, i) => { this.remota.dir[a] = !!m.h[i]; });
+      } else if (m.t === 'k') {
+        if (m.a === 'pausa') this.pausar();
+        else this.remota.buffer[m.a] = true;
+      }
+    };
+    RED.alCortarse = () => {
+      const j = this.jugadores.find((x) => x.remoto);
+      RED.cerrar();
+      if (!j || j.fuera) return;
+      this.anuncio(j.cfg.nombre + ' SE DESCONECTÓ', '#ff4f6a', 2000);
+      j.fuera = true;
+      if (j.estado !== 'muerto') j.morir();
+      this.revisarGameOver();
+    };
+    // los temblores de camara tambien se ven en el otro dispositivo
+    const cam = this.cameras.main, temblar = cam.shake.bind(cam);
+    cam.shake = (d, i) => { RED.enviar({ t: 'sh', d, i }); return temblar(d, i); };
+    this.events.once('shutdown', () => { RED.enJuego = false; });
+  }
+
+  // Estado del juego que se manda al invitado (numeros redondeados para que pese poco)
+  enviarEstado() {
+    const r = Math.round;
+    const ent = (l) => [r(l.x), r(l.y), r(l.z), l.dir, l.poseActual, r(l.estado === 'caido' ? l.angulo : 0),
+      Math.round((l.spr.visible ? l.spr.alpha : 0) * 100) / 100, r(l.hp), l.hpMax, this.time.now < (l.flashHasta || 0) ? 1 : 0];
+    RED.enviar({
+      t: 'e', f: this.fase, o: this.oleada, ti: r(this.tiempo * 10) / 10, p: this.puntos, pa: this.pausado ? 1 : 0,
+      j: this.jugadores.map((j) => [j.tipo].concat(ent(j), [Math.max(0, j.vidas), j.fuera ? 1 : 0])),
+      e: this.enemigos.map((e) => [e.id, e.tipo, e.alto, e.esBoss ? 1 : 0].concat(ent(e))),
+      b: this.balas.map((b) => [r(b.x), r(b.y), r(b.altura)]),
+      ev: this.enemigoVisto && this.enemigoVistoT > 0 ? this.enemigoVisto.id : 0,
+      bo: this.boss ? this.boss.id : 0,
+      jf: this.boss ? 1 : 0
+    });
+  }
+
+  // ---------------- Cooperativo: invitado ----------------
+  prepararEspejo() {
+    this.espejo = { j: [], e: {}, balas: [], estado: null };
+    this.ultimoDir = '';
+    this.dirT = 0;
+    RED.oyente = (m) => this.recibir(m);
+    RED.alCortarse = () => {
+      RED.cerrar();
+      this.anuncio('SE CORTÓ LA CONEXIÓN', '#ff4f6a', 2500, 40, true);
+      this.time.delayedCall(3000, () => this.scene.start('menu'));
+    };
+  }
+
+  recibir(m) {
+    if (m.t === 'e') this.espejo.estado = m;
+    else if (m.t === 'snd') RED.sonar(m.n);
+    else if (m.t === 'an') this.anuncio(m.x, m.c, m.d, m.s, true);
+    else if (m.t === 'fx') this.dibujarGolpe(m.x, m.y, m.f);
+    else if (m.t === 'sh') this.cameras.main.shake(m.d, m.i);
+    else if (m.t === 'res') this.mostrarResumen(m.r, null);
+    else if (m.t === 'niv') {
+      this.cameras.main.fadeOut(500, 0, 0, 0);
+      this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('nivel', { nivel: m.n, tipos: m.tipos }));
+    } else if (m.t === 'fin') {
+      this.cameras.main.fadeOut(500, 0, 0, 0);
+      this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('final', m.d));
+    }
+  }
+
+  // Manda las teclas del invitado y dibuja lo ultimo que llego del anfitrion
+  actualizarEspejo(dt) {
+    const dirs = ['izquierda', 'derecha', 'arriba', 'abajo'].map((a) => (this.apretada(a) ? 1 : 0));
+    const clave = dirs.join('');
+    this.dirT -= dt;
+    if (clave !== this.ultimoDir || this.dirT <= 0) { RED.enviar({ t: 'in', h: dirs }); this.ultimoDir = clave; this.dirT = 0.25; }
+    ['pinia', 'patada', 'salto', 'pausa'].forEach((a) => { if (this.recienApretada(a)) RED.enviar({ t: 'k', a }); });
+
+    const s = this.espejo.estado;
+    if (!s) return;
+    const suave = Math.min(1, dt * 18);
+    const mover = (l, d) => {
+      // d = [x, y, z, dir, pose, angulo, alpha, hp, hpMax, flash]
+      const salto = Math.abs(l.x - d[0]) > 150 || Math.abs(l.y - d[1]) > 80;
+      l.x = salto ? d[0] : l.x + (d[0] - l.x) * suave;
+      l.y = salto ? d[1] : l.y + (d[1] - l.y) * suave;
+      l.z = salto ? d[2] : l.z + (d[2] - l.z) * suave;
+      l.dir = d[3];
+      if (d[4]) l.pose(d[4]);
+      l.angulo = d[5];
+      l.estado = d[5] ? 'caido' : 'libre';
+      l.invul = 0;
+      l.hp = d[7]; l.hpMax = d[8];
+      l.sync();
+      l.spr.alpha = d[6];
+      l.spr.visible = d[6] > 0;
+      l.sombra.visible = d[6] > 0;
+      if (d[9]) l.spr.setTint(0xff7070); else l.spr.clearTint();
+    };
+    const crear = (tipo, d, alto) => {
+      const l = new Luchador(this, tipo, d[0], d[1], { alto, hp: d[8] || 1, dir: d[3] });
+      l.z = d[2];
+      return l;
+    };
+
+    // jugadores
+    s.j.forEach((d, i) => {
+      let l = this.espejo.j[i];
+      if (!l || l.tipo !== d[0]) {
+        if (l) l.destruir();
+        l = this.espejo.j[i] = crear(d[0], d.slice(1), window.JUEGO.config.personajes[d[0]].alto);
+      }
+      mover(l, d.slice(1, 11));
+      l.vidas = d[11];
+      l.fuera = !!d[12];
+    });
+    // enemigos: se crean los nuevos y se borran los que ya no estan
+    const vistos = {};
+    s.e.forEach((d) => {
+      const id = d[0];
+      vistos[id] = true;
+      let l = this.espejo.e[id];
+      if (!l) { l = this.espejo.e[id] = crear(d[1], d.slice(4), d[2]); l.id = id; l.esBoss = !!d[3]; l.cfg = window.JUEGO.config.personajes[d[1]]; }
+      mover(l, d.slice(4, 14));
+    });
+    for (const id in this.espejo.e) {
+      if (!vistos[id]) { this.espejo.e[id].destruir(); delete this.espejo.e[id]; }
+    }
+    // balas
+    this.espejo.balas.forEach((b) => b.destroy());
+    this.espejo.balas = s.b.map((b) => this.add.rectangle(b[0], b[1] - b[2], 18, 5, 0xffd34f).setDepth(b[1] + 1));
+
+    // datos para el HUD
+    this.puntos = s.p; this.tiempo = s.ti; this.oleada = s.o; this.fase = s.f;
+    this.jugadores = this.espejo.j;
+    this.boss = s.bo ? this.espejo.e[s.bo] || null : null;
+    this.hayJefe = !!s.jf;
+    if (this.boss && !this.textoBoss.visible) this.textoBoss.setText(this.boss.cfg.nombre).setVisible(true);
+    this.enemigoVisto = s.ev ? this.espejo.e[s.ev] : null;
+    this.enemigoVistoT = this.enemigoVisto ? 1 : 0;
+    this.textoPausa.setVisible(!!s.pa);
+    this.actualizarHUD(0);
   }
 
   // ---------------- Oleadas ----------------
@@ -118,8 +321,11 @@ class EscenaNivel extends Phaser.Scene {
       if (jefe.vida) cfg.hp = jefe.vida;
       if (jefe.alto) cfg.alto = jefe.alto;
     }
+    // de a 2 los enemigos aguantan mas
+    if (this.jugadores.length > 1) cfg.hp = Math.round(cfg.hp * (J.config.cooperativo.vidaEnemigos || 1));
     const y = Phaser.Math.Between(J.PISO_MIN + 10, J.PISO_MAX - 10);
     const e = new Luchador(this, tipo, x, y, { alto: cfg.alto, hp: cfg.hp, dir: x < 480 ? 1 : -1 });
+    e.id = this.idSiguiente++;
     e.cfg = cfg;
     e.esBoss = esJefe;
     e.alcance = cfg.alcance || 100;
@@ -132,7 +338,13 @@ class EscenaNivel extends Phaser.Scene {
 
   // ---------------- Bucle principal ----------------
   update(time, delta) {
-    if (this.recienApretada('pausa')) this.pausar();
+    if (this.esInvitado) { this.actualizarEspejo(Math.min(delta / 1000, 0.05)); return; }
+
+    if (this.red === 'anfitrion') {
+      this.envioT -= delta / 1000;
+      if (this.envioT <= 0) { this.envioT = 1 / ENVIOS_POR_SEG; this.enviarEstado(); }
+    }
+    if (this.jugadores.some((j) => !j.remoto && j.control.recienApretada('pausa'))) this.pausar();
     if (this.pausado) return;
 
     const dt = Math.min(delta / 1000, 0.05);
@@ -140,14 +352,13 @@ class EscenaNivel extends Phaser.Scene {
     if (this.fase !== 'intro' && this.fase !== 'fin') this.tiempo += delta / 1000;
     if (this.hitStop > 0) { this.hitStop -= dt; return; }
 
-    this.actualizarAngie(dt);
-    this.angie.fisica(dt);
+    for (const j of this.jugadores) { this.actualizarJugador(j, dt); j.fisica(dt); }
 
     for (const e of this.enemigos) { this.actualizarEnemigo(e, dt); e.fisica(dt); }
     this.separarEnemigos();
     this.actualizarBalas(dt);
 
-    this.angie.sync();
+    for (const j of this.jugadores) j.sync();
     for (const e of this.enemigos) e.sync();
 
     this.revisarMuertes();
@@ -155,15 +366,16 @@ class EscenaNivel extends Phaser.Scene {
     this.actualizarHUD(dt);
   }
 
-  // ---------------- Angie ----------------
-  actualizarAngie(dt) {
-    const P = window.JUEGO.config.personajes.angie, a = this.angie;
-    const izq = this.apretada('izquierda'), der = this.apretada('derecha');
-    const arr = this.apretada('arriba'), aba = this.apretada('abajo');
-    const punio = this.recienApretada('pinia');
-    const patada = this.recienApretada('patada');
-    const salto = this.recienApretada('salto');
+  // ---------------- Jugadores ----------------
+  actualizarJugador(a, dt) {
+    const P = a.cfg, c = a.control;
+    const izq = c.apretada('izquierda'), der = c.apretada('derecha');
+    const arr = c.apretada('arriba'), aba = c.apretada('abajo');
+    const punio = c.recienApretada('pinia');
+    const patada = c.recienApretada('patada');
+    const salto = c.recienApretada('salto');
 
+    if (a.fuera) return;
     if (this.fase === 'fin' && a.estado === 'libre') { a.vx = 0; a.vy = 0; a.animarCaminar(dt, false); return; }
     if (a.actualizarComun(dt)) return;
 
@@ -180,9 +392,9 @@ class EscenaNivel extends Phaser.Scene {
         a.pateaAire = false; a.yaPateo = false; a.golpeadosAire = [];
         a.pose('salto'); Sonido.salto();
       } else if (punio) {
-        this.ataqueAngie('punio');
+        this.ataqueJugador(a, 'punio');
       } else if (patada) {
-        this.ataqueAngie('patada');
+        this.ataqueJugador(a, 'patada');
       }
     } else if (a.estado === 'aire') {
       a.vx = mx * P.vel * 0.9;
@@ -200,8 +412,8 @@ class EscenaNivel extends Phaser.Scene {
     }
   }
 
-  ataqueAngie(tipo) {
-    const P = window.JUEGO.config.personajes.angie, a = this.angie;
+  ataqueJugador(a, tipo) {
+    const P = a.cfg;
     const ahora = this.time.now / 1000;
     a.vx = 0; a.vy = 0;
     Sonido.aire();
@@ -233,43 +445,62 @@ class EscenaNivel extends Phaser.Scene {
     }
   }
 
-  angieSinVida() {
-    const a = this.angie;
-    this.vidas--;
+  jugadorSinVida(a) {
+    a.vidas--;
     this.vidasPerdidas++;
-    if (this.vidas > 0) {
-      this.anuncio('¡ARRIBA ANGIE!', '#ffd34f');
+    if (a.vidas > 0) {
+      this.anuncio('¡ARRIBA ' + a.cfg.nombre + '!', '#ffd34f');
       a.hp = a.hpMax;
       a.fase = 'levanta'; a.timer = 0.4; a.angulo = 0; a.pose('aterriza');
       this.time.delayedCall(450, () => { a.invul = 2.2; });
     } else {
       a.morir();
-      this.fase = 'fin';
-      // al perder no hay premio por tiempo, pero si se descuenta el daño y las vidas
-      const r = this.calcularPuntaje(false);
-      this.puntos = r.total;
-      this.time.delayedCall(1800, () => this.irAFinal(false, r));
+      a.fuera = true;
+      const termino = this.revisarGameOver();
+      if (!termino && this.jugadores.length > 1) this.anuncio(a.cfg.nombre + ' QUEDÓ AFUERA', '#ff4f6a', 1800);
     }
   }
 
+  // Se pierde cuando quedan afuera todos los jugadores. Devuelve true si termino.
+  revisarGameOver() {
+    if (this.fase === 'fin' || !this.jugadores.every((j) => j.fuera)) return false;
+    this.fase = 'fin';
+    // al perder no hay premio por tiempo, pero si se descuenta el daño y las vidas
+    const r = this.calcularPuntaje(false);
+    this.puntos = r.total;
+    this.time.delayedCall(1800, () => this.irAFinal(false, r));
+    return true;
+  }
+
   // ---------------- Enemigos ----------------
+  // el jugador mas cercano que sigue en juego
+  objetivo(e) {
+    let mejor = null, dmin = Infinity;
+    for (const j of this.jugadores) {
+      if (j.fuera || !j.vivo) continue;
+      const d = Math.abs(j.x - e.x) + Math.abs(j.y - e.y) * 2;
+      if (d < dmin) { dmin = d; mejor = j; }
+    }
+    return mejor;
+  }
+
   actualizarEnemigo(e, dt) {
-    const J = window.JUEGO, a = this.angie;
+    const J = window.JUEGO;
     if (e.actualizarComun(dt)) return;
     if (e.estado === 'ataque') { this.secuencia(e, dt); return; }
 
     if (!e.limitarX && e.x > J.X_MIN && e.x < J.X_MAX) e.limitarX = true;
     e.cool -= dt;
+    const a = this.objetivo(e);
+    if (!a || this.fase === 'fin') { e.vx = 0; e.vy = 0; e.animarCaminar(dt, false); return; }
     e.dir = a.x >= e.x ? 1 : -1;
-
-    if (!a.vivo || this.fase === 'fin') { e.vx = 0; e.vy = 0; e.animarCaminar(dt, false); return; }
 
     const distX = Math.abs(a.x - e.x), distY = Math.abs(a.y - e.y);
     const cfg = e.cfg;
     const espera = () => Phaser.Math.FloatBetween(cfg.esperaMin, Math.max(cfg.esperaMin, cfg.esperaMax));
     const turnoLibre = this.time.now - this.ultimoAtaqueEnemigo > 450;
 
-    // Los que tienen arma disparan si Angie esta lejos y en la misma linea
+    // Los que tienen arma disparan si el jugador esta lejos y en la misma linea
     if (cfg.dispara && e.limitarX && distX > 260 && distY < 40 && e.cool <= 0) {
       e.cool = espera() + 1.0;
       this.iniciarSecuencia(e, [
@@ -287,8 +518,8 @@ class EscenaNivel extends Phaser.Scene {
       this.iniciarSecuencia(e, [
         { p: 'punio1', d: e.esBoss ? 0.3 : 0.38 },
         conPatada
-          ? { p: 'patada', d: 0.25, golpe: () => this.golpear(e, [a], e.alcance + 15, cfg.patada, e.esBoss) }
-          : { p: 'punio3', d: 0.22, golpe: () => this.golpear(e, [a], e.alcance, cfg.punio, false) },
+          ? { p: 'patada', d: 0.25, golpe: () => this.golpear(e, this.jugadores, e.alcance + 15, cfg.patada, e.esBoss) }
+          : { p: 'punio3', d: 0.22, golpe: () => this.golpear(e, this.jugadores, e.alcance, cfg.punio, false) },
         { p: 'parado', d: 0.3 }
       ]);
       return;
@@ -327,11 +558,11 @@ class EscenaNivel extends Phaser.Scene {
   }
 
   actualizarBalas(dt) {
-    const a = this.angie;
     this.balas = this.balas.filter((b) => {
       b.x += b.dir * 600 * dt;
       b.spr.x = b.x;
-      if (Math.abs(a.y - b.y) < 22 && Math.abs(a.x - b.x) < 28 && a.z < 60 && a.golpeable) {
+      const a = this.jugadores.find((j) => !j.fuera && Math.abs(j.y - b.y) < 22 && Math.abs(j.x - b.x) < 28 && j.z < 60 && j.golpeable);
+      if (a) {
         const hpAntes = a.hp;
         a.recibirGolpe(b.danio, b.dir, false);
         a.invul = Math.max(a.invul, 0.3);
@@ -368,7 +599,7 @@ class EscenaNivel extends Phaser.Scene {
   golpear(at, objetivos, alcance, danio, fuerte, alturaMax) {
     const golpeados = [];
     for (const o of objetivos) {
-      if (!o.golpeable) continue;
+      if (!o.golpeable || o.fuera) continue;
       const dx = (o.x - at.x) * at.dir;
       const dy = Math.abs(o.y - at.y);
       if (dx > -20 && dx < alcance && dy < 32 && Math.abs(o.z - at.z) < (alturaMax || 70)) {
@@ -376,7 +607,7 @@ class EscenaNivel extends Phaser.Scene {
         if (o.recibirGolpe(danio, at.dir, fuerte)) {
           golpeados.push(o);
           this.efectoGolpe(o, fuerte || o.estado === 'caido');
-          if (o === this.angie) { o.invul = Math.max(o.invul, 0.3); this.danioRecibido += hpAntes - o.hp; Sonido.herida(); }
+          if (o.esJugador) { o.invul = Math.max(o.invul, 0.3); this.danioRecibido += hpAntes - o.hp; Sonido.herida(); }
           else { this.enemigoVisto = o; this.enemigoVistoT = 2.5; }
         }
       }
@@ -390,6 +621,11 @@ class EscenaNivel extends Phaser.Scene {
     if (fuerte) this.cameras.main.shake(120, 0.006);
     const x = o.x + Phaser.Math.Between(-10, 10);
     const y = o.y - o.z - o.alto * 0.62;
+    this.dibujarGolpe(x, y, fuerte);
+    RED.enviar({ t: 'fx', x: Math.round(x), y: Math.round(y), f: fuerte ? 1 : 0 });
+  }
+
+  dibujarGolpe(x, y, fuerte) {
     const estrella = this.add.star(x, y, 7, 8, fuerte ? 34 : 24, fuerte ? 0xffe27a : 0xffffff).setDepth(9000);
     this.tweens.add({ targets: estrella, scale: 1.6, alpha: 0, angle: 60, duration: 220, onComplete: () => estrella.destroy() });
   }
@@ -416,6 +652,7 @@ class EscenaNivel extends Phaser.Scene {
   }
 
   nivelTerminado() {
+    if (this.fase === 'fin') return;
     const C = window.JUEGO.config;
     this.fase = 'fin';
     this.balas.forEach((b) => b.spr.destroy()); this.balas = [];
@@ -425,9 +662,13 @@ class EscenaNivel extends Phaser.Scene {
     this.time.delayedCall(1800, () => this.mostrarResumen(r, () => {
       this.puntos = r.total;
       if (hayMas) {
+        // si el invitado se fue, se sigue solo con el de este dispositivo
+        const siguen = this.jugadores.filter((j) => !j.remoto || RED.activa())
+          .map((j) => ({ tipo: j.tipo, vidas: j.vidas, remoto: j.remoto }));
+        RED.enviar({ t: 'niv', n: this.numNivel + 1, tipos: siguen.map((j) => j.tipo) });
         this.cameras.main.fadeOut(500, 0, 0, 0);
         this.cameras.main.once('camerafadeoutcomplete', () =>
-          this.scene.start('nivel', { nivel: this.numNivel + 1, vidas: this.vidas, puntos: this.puntos }));
+          this.scene.start('nivel', { nivel: this.numNivel + 1, puntos: this.puntos, jugadores: siguen }));
       } else this.irAFinal(true);
     }));
   }
@@ -447,7 +688,9 @@ class EscenaNivel extends Phaser.Scene {
   }
 
   // Cartel con la cuenta de puntos del nivel. Sigue solo, o antes con cualquier tecla / toque.
+  // alTerminar = null: solo se muestra (invitado, espera a que siga el anfitrion).
   mostrarResumen(r, alTerminar) {
+    if (alTerminar) RED.enviar({ t: 'res', r });
     const D = 9900, cont = this.add.container(0, 0).setDepth(D);
     cont.add(this.add.rectangle(480, 360, 640, 430, 0x000000, 0.82).setStrokeStyle(4, 0xff4fd8));
     cont.add(this.add.text(480, 180, 'RESULTADO DEL NIVEL', ESTILO(32, '#ffd34f')).setOrigin(0.5));
@@ -463,11 +706,19 @@ class EscenaNivel extends Phaser.Scene {
       const izq = this.add.text(200, y, f[0], ESTILO(i === filas.length - 1 ? 30 : 24, f[2])).setOrigin(0, 0.5).setAlpha(0);
       const der = this.add.text(760, y, f[1], ESTILO(i === filas.length - 1 ? 30 : 24, f[2])).setOrigin(1, 0.5).setAlpha(0);
       cont.add([izq, der]);
-      this.time.delayedCall(300 + i * 380, () => { izq.setAlpha(1); der.setAlpha(1); (i === filas.length - 1 ? Sonido.elegir : Sonido.menu)(); });
+      this.time.delayedCall(300 + i * 380, () => {
+        izq.setAlpha(1); der.setAlpha(1);
+        if (alTerminar) (i === filas.length - 1 ? Sonido.elegir : Sonido.menu)();
+      });
     });
-    const sigue = this.add.text(480, 545, this.tactil ? 'Tocá para seguir' : 'Apretá una tecla para seguir', ESTILO(18, '#9fb4ff'))
-      .setOrigin(0.5).setAlpha(0);
+    const textoSigue = !alTerminar ? 'Esperando que siga el otro jugador...'
+      : (this.tactil ? 'Tocá para seguir' : 'Apretá una tecla para seguir');
+    const sigue = this.add.text(480, 545, textoSigue, ESTILO(18, '#9fb4ff')).setOrigin(0.5).setAlpha(0);
     cont.add(sigue);
+
+    const tEspera = 300 + filas.length * 380 + 400;
+    this.time.delayedCall(tEspera, () => sigue.setAlpha(1));
+    if (!alTerminar) return;
 
     let listo = false;
     const seguir = () => {
@@ -477,9 +728,7 @@ class EscenaNivel extends Phaser.Scene {
       this.input.off('pointerdown', seguir);
       alTerminar();
     };
-    const tEspera = 300 + filas.length * 380 + 400;
     this.time.delayedCall(tEspera, () => {
-      sigue.setAlpha(1);
       this.input.keyboard.on('keydown', seguir);
       this.input.on('pointerdown', seguir);
     });
@@ -487,16 +736,23 @@ class EscenaNivel extends Phaser.Scene {
   }
 
   irAFinal(gano, resumen) {
+    const d = { gano, puntos: this.puntos, resumen, tipos: this.jugadores.map((j) => j.tipo), coop: this.jugadores.length > 1 };
+    RED.enviar({ t: 'fin', d });
     this.cameras.main.fadeOut(500, 0, 0, 0);
-    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('final', { gano, puntos: this.puntos, resumen }));
+    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('final', d));
   }
 
   // ---------------- Pantalla (HUD) ----------------
-  crearHUD() {
+  crearHUD(tipos) {
     const D = 9500;
     this.hud = this.add.graphics().setDepth(D);
-    this.add.text(20, 14, window.JUEGO.config.personajes.angie.nombre, ESTILO(22, '#ff4fd8')).setDepth(D + 1);
-    this.textoVidas = this.add.text(20, 66, '', ESTILO(18, '#ffffff')).setDepth(D + 1);
+    // cada jugador: nombre, barra de vida y vidas (P1 arriba, P2 abajo)
+    this.hudJug = tipos.map((t, i) => {
+      const y0 = i * 82;
+      const nombre = (tipos.length > 1 ? 'P' + (i + 1) + ' ' : '') + window.JUEGO.config.personajes[t].nombre;
+      this.add.text(20, 14 + y0, nombre, ESTILO(22, COLOR_JUGADOR[t] || '#ff4fd8')).setDepth(D + 1);
+      return { y0, vidas: this.add.text(20, 66 + y0, '', ESTILO(18, '#ffffff')).setDepth(D + 1) };
+    });
     this.textoPuntos = this.add.text(940, 14, '', ESTILO(22, '#5ff4ff')).setOrigin(1, 0).setDepth(D + 1);
     this.textoOleada = this.add.text(480, 16, '', ESTILO(20, '#ffd34f')).setOrigin(0.5, 0).setDepth(D + 1);
     this.textoTiempo = this.add.text(480, 46, '', ESTILO(18, '#ffffff')).setOrigin(0.5, 0).setDepth(D + 1);
@@ -513,14 +769,18 @@ class EscenaNivel extends Phaser.Scene {
   }
 
   actualizarHUD(dt) {
-    const a = this.angie;
     this.hud.clear();
-    this.barra(20, 42, 260, 16, a.hp / a.hpMax, a.hp / a.hpMax > 0.3 ? 0xff4fd8 : 0xff4f4f);
-    this.textoVidas.setText('♥ x ' + Math.max(0, this.vidas));
+    this.hudJug.forEach((h, i) => {
+      const j = this.jugadores[i];
+      if (!j) return;
+      const frac = j.hp / j.hpMax;
+      this.barra(20, 42 + h.y0, 260, 16, frac, frac > 0.3 ? 0xff4fd8 : 0xff4f4f);
+      h.vidas.setText(j.fuera ? 'AFUERA' : '♥ x ' + Math.max(0, j.vidas));
+    });
     this.textoPuntos.setText('PUNTOS ' + this.puntos);
     this.textoTiempo.setText('TIEMPO ' + formatoTiempo(this.tiempo));
     const nv = 'NIVEL ' + (this.numNivel + 1) + '  ·  ';
-    this.textoOleada.setText(nv + (this.boss ? 'JEFE FINAL' : (this.oleada ? 'OLEADA ' + this.oleada + ' / ' + this.nivel.oleadas.length : '')));
+    this.textoOleada.setText(nv + (this.boss || this.hayJefe ? 'JEFE FINAL' : (this.oleada ? 'OLEADA ' + this.oleada + ' / ' + this.nivel.oleadas.length : '')));
 
     this.enemigoVistoT -= dt;
     const ev = this.enemigoVisto;
@@ -532,7 +792,9 @@ class EscenaNivel extends Phaser.Scene {
     if (this.boss) this.barra(230, 662, 500, 18, this.boss.hp / this.boss.hpMax, 0xff4f6a);
   }
 
-  anuncio(texto, color, dur, tam) {
+  // local = true: no se reenvia al otro jugador
+  anuncio(texto, color, dur, tam, local) {
+    if (!local) RED.enviar({ t: 'an', x: texto, c: color, d: dur, s: tam });
     const t = this.add.text(480, 300, texto, ESTILO(tam || 54, color)).setOrigin(0.5).setDepth(9800).setScale(0.3);
     t.setWordWrapWidth(900);
     this.tweens.add({ targets: t, scale: 1, duration: 250, ease: 'Back.easeOut' });

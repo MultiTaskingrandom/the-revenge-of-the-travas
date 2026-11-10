@@ -10,7 +10,8 @@ class Luchador {
     this.alto = opciones.alto;
     // Escala: la pose "parado" mide "alto" pixeles. La 2da fila de la hoja esta dibujada mas grande,
     // se compensa con la relacion entre el punio de la fila 1 y el de la fila 2.
-    this.escalaBase = this.alto / this.meta.parado.h;
+    // (_refH: hojas con algo arriba de la cabeza, como el paraguas de Lula, que no cuenta para la altura)
+    this.escalaBase = this.alto / (this.meta._refH || this.meta.parado.h);
     this.escalaFila2 = this.meta.punio2.h / this.meta.punio3.h;
 
     this.x = x; this.y = y; this.z = 0;
@@ -80,6 +81,7 @@ class Luchador {
 
   flash() {
     this.spr.setTint(0xff7070);
+    this.flashHasta = this.scene.time.now + 90;   // (el anfitrion se lo avisa al invitado)
     this.scene.time.delayedCall(90, () => { if (this.spr.active) this.spr.clearTint(); });
   }
 
