@@ -40,6 +40,13 @@ class EscenaNivel extends Phaser.Scene {
     this.tiempo = 0;
     this.danioRecibido = 0;
     this.vidasPerdidas = 0;
+    this.puntosInicio = this.puntos;   // los que venian de niveles anteriores
+    this.puntosEnemigos = 0;
+    this.puntosCombos = 0;
+    this.combosHechos = 0;
+    // dificultad: la elige el que juega solo o el que crea la partida online
+    this.claveDif = this.opc.dificultad || 'normal';
+    this.dif = C.dificultades[this.claveDif] || C.dificultades.normal;
 
     // la zona caminable depende del fondo de cada nivel
     J.PISO_MIN = this.nivel.pisoMin || 615;
@@ -125,11 +132,16 @@ class EscenaNivel extends Phaser.Scene {
     return { apretada: (a) => this.apretada(a), recienApretada: (a) => this.recienApretada(a) };
   }
   // Control del invitado: lo que llega por internet
+  // (los botones llegan en una fila, en orden: si llegan varios juntos se usan de a uno por cuadro,
+  //  asi no se pierde ninguna piña de un combo)
   entradaRemota() {
-    const e = this.remota = { dir: {}, buffer: {} };
+    const e = this.remota = { dir: {}, fila: [] };
     return {
       apretada: (a) => !!e.dir[a],
-      recienApretada: (a) => { const r = !!e.buffer[a]; e.buffer[a] = false; return r; }
+      recienApretada: (a) => {
+        if (e.usado || e.fila[0] !== a) return false;   // uno por cuadro (usado se limpia en update)
+        e.fila.shift(); e.usado = true; return true;
+      }
     };
   }
 
@@ -143,7 +155,7 @@ class EscenaNivel extends Phaser.Scene {
         ['izquierda', 'derecha', 'arriba', 'abajo'].forEach((a, i) => { this.remota.dir[a] = !!m.h[i]; });
       } else if (m.t === 'k') {
         if (m.a === 'pausa') this.pausar();
-        else this.remota.buffer[m.a] = true;
+        else if (this.remota.fila.length < 6) this.remota.fila.push(m.a);
       }
     };
     RED.alCortarse = () => {
@@ -173,7 +185,8 @@ class EscenaNivel extends Phaser.Scene {
       b: this.balas.map((b) => [r(b.x), r(b.y), r(b.altura)]),
       ev: this.enemigoVisto && this.enemigoVistoT > 0 ? this.enemigoVisto.id : 0,
       bo: this.boss ? this.boss.id : 0,
-      jf: this.boss ? 1 : 0
+      jf: this.boss ? 1 : 0,
+      df: this.claveDif
     });
   }
 
@@ -195,6 +208,7 @@ class EscenaNivel extends Phaser.Scene {
     else if (m.t === 'snd') RED.sonar(m.n);
     else if (m.t === 'an') this.anuncio(m.x, m.c, m.d, m.s, true);
     else if (m.t === 'fx') this.dibujarGolpe(m.x, m.y, m.f);
+    else if (m.t === 'tf') this.textoFlotante(m.x, m.y, m.x2, m.c, true);
     else if (m.t === 'sh') this.cameras.main.shake(m.d, m.i);
     else if (m.t === 'res') this.mostrarResumen(m.r, null);
     else if (m.t === 'niv') {
@@ -273,6 +287,7 @@ class EscenaNivel extends Phaser.Scene {
     this.jugadores = this.espejo.j;
     this.boss = s.bo ? this.espejo.e[s.bo] || null : null;
     this.hayJefe = !!s.jf;
+    if (s.df) this.dif = window.JUEGO.config.dificultades[s.df] || this.dif;
     if (this.boss && !this.textoBoss.visible) this.textoBoss.setText(this.boss.cfg.nombre).setVisible(true);
     this.enemigoVisto = s.ev ? this.espejo.e[s.ev] : null;
     this.enemigoVistoT = this.enemigoVisto ? 1 : 0;
@@ -325,6 +340,12 @@ class EscenaNivel extends Phaser.Scene {
     }
     // de a 2 los enemigos aguantan mas
     if (this.jugadores.length > 1) cfg.hp = Math.round(cfg.hp * (J.config.cooperativo.vidaEnemigos || 1));
+    // dificultad: mas o menos vida y daño de los enemigos
+    cfg.hp = Math.max(1, Math.round(cfg.hp * (this.dif.vidaEnemigos || 1)));
+    const md = this.dif.danioEnemigos || 1;
+    cfg.punio = Math.round(cfg.punio * md);
+    cfg.patada = Math.round(cfg.patada * md);
+    cfg.bala = Math.round(cfg.bala * md);
     const y = Phaser.Math.Between(J.PISO_MIN + 10, J.PISO_MAX - 10);
     const e = new Luchador(this, tipo, x, y, { alto: cfg.alto, hp: cfg.hp, dir: x < 480 ? 1 : -1 });
     e.id = this.idSiguiente++;
@@ -354,6 +375,7 @@ class EscenaNivel extends Phaser.Scene {
     if (this.fase !== 'intro' && this.fase !== 'fin') this.tiempo += delta / 1000;
     if (this.hitStop > 0) { this.hitStop -= dt; return; }
 
+    if (this.remota) this.remota.usado = false;
     for (const j of this.jugadores) { this.actualizarJugador(j, dt); j.fisica(dt); }
 
     for (const e of this.enemigos) { this.actualizarEnemigo(e, dt); e.fisica(dt); }
@@ -373,11 +395,25 @@ class EscenaNivel extends Phaser.Scene {
     const P = a.cfg, c = a.control;
     const izq = c.apretada('izquierda'), der = c.apretada('derecha');
     const arr = c.apretada('arriba'), aba = c.apretada('abajo');
-    const punio = c.recienApretada('pinia');
-    const patada = c.recienApretada('patada');
+    let punio = c.recienApretada('pinia');
+    let patada = c.recienApretada('patada');
     const salto = c.recienApretada('salto');
 
     if (a.fuera) return;
+    // si aprieta piña/patada mientras todavia esta pegando, se guarda para hacerlo apenas termine
+    // (asi los combos salen aunque se apriete un poquito antes)
+    // (se guardan hasta 2, en orden, para que no se pierda ninguna si se aprieta rapido)
+    a.cola = a.cola || [];
+    if (a.estado === 'ataque' && (punio || patada)) {
+      if (punio && a.cola.length < 2) a.cola.push('punio');
+      if (patada && a.cola.length < 2) a.cola.push('patada');
+      punio = patada = false;
+    }
+    if (a.estado === 'libre' && a.cola.length) {
+      if (!punio && !patada) { const sig = a.cola.shift(); punio = sig === 'punio'; patada = sig === 'patada'; }
+      else a.cola.length = 0;
+    }
+    if (a.estado !== 'ataque' && a.estado !== 'libre') a.cola.length = 0;
     if (this.fase === 'fin' && a.estado === 'libre') { a.vx = 0; a.vy = 0; a.animarCaminar(dt, false); return; }
     if (a.actualizarComun(dt)) return;
 
@@ -421,37 +457,75 @@ class EscenaNivel extends Phaser.Scene {
     return this.enemigos.concat(this.jugadores.filter((j) => j !== a && !j.fuera));
   }
 
+  // Combos (dan puntos solo si TODOS los golpes le pegan a un enemigo):
+  //   PIÑA, PIÑA, PIÑA   -> combo triple (el 3er golpe tira al piso)
+  //   PIÑA, PIÑA, PATADA -> combo patada (patada mas fuerte: daño "comboPatada")
+  // a.combo = cuantas piñas seguidas lleva QUE LE PEGARON a un enemigo
+  //   (se corta si una piña no pega o si pasan mas de 0.6 seg entre golpes)
   ataqueJugador(a, tipo) {
     const P = a.cfg;
     const ahora = this.time.now / 1000;
+    const seguido = ahora - a.ultimoPunio < 0.6;
     a.vx = 0; a.vy = 0;
     Sonido.aire();
     if (tipo === 'patada') {
+      const esCombo = seguido && a.combo === 2;
       a.combo = 0;
-      this.iniciarSecuencia(a, [
-        { p: 'punio1', d: 0.07 },
-        { p: 'patada', d: 0.24, golpe: () => this.golpear(a, this.blancos(a), 118, P.patada, true) },
-        { p: 'parado', d: 0.06 }
-      ]);
+      if (esCombo) {
+        this.iniciarSecuencia(a, [
+          { p: 'punio1', d: 0.06 },
+          { p: 'patada', d: 0.3, golpe: () => this.cerrarCombo(a, 'piniaPatada', this.golpear(a, this.blancos(a), 130, P.comboPatada || P.patada, true)) },
+          { p: 'parado', d: 0.06 }
+        ]);
+      } else {
+        this.iniciarSecuencia(a, [
+          { p: 'punio1', d: 0.07 },
+          { p: 'patada', d: 0.24, golpe: () => this.golpear(a, this.blancos(a), 118, P.patada, true) },
+          { p: 'parado', d: 0.06 }
+        ]);
+      }
       return;
     }
-    a.combo = (ahora - a.ultimoPunio < 0.6) ? a.combo + 1 : 1;
+    a.combo = seguido ? a.combo + 1 : 1;
     a.ultimoPunio = ahora;
     if (a.combo >= 3) {
       a.combo = 0;
       this.iniciarSecuencia(a, [
         { p: 'punio1', d: 0.08 },
-        { p: 'punio3', d: 0.2, golpe: () => this.golpear(a, this.blancos(a), 108, P.remate, true) },
+        { p: 'punio3', d: 0.2, golpe: () => this.cerrarCombo(a, 'triple', this.golpear(a, this.blancos(a), 108, P.remate, true)) },
         { p: 'punio2', d: 0.08 }
       ]);
     } else {
       this.iniciarSecuencia(a, [
         { p: 'punio1', d: 0.04 },
         { p: 'punio2', d: 0.04 },
-        { p: 'punio3', d: 0.12, golpe: () => this.golpear(a, this.blancos(a), 100, P.punio, false) },
+        { p: 'punio3', d: 0.12, golpe: () => {
+          // si esta piña no le pego a ningun enemigo, se corta el combo (la proxima empieza de cero)
+          if (!this.golpear(a, this.blancos(a), 100, P.punio, false).some((o) => !o.esJugador)) a.combo = 0;
+        } },
         { p: 'punio2', d: 0.05 }
       ]);
     }
+  }
+
+  // Si el golpe final del combo le pego a algun enemigo: puntos y cartelito arriba del jugador
+  cerrarCombo(a, tipo, golpeados) {
+    if (!golpeados.some((o) => !o.esJugador)) return;
+    const pts = (window.JUEGO.config.combos || {})[tipo] || 0;
+    this.puntos += pts;
+    this.puntosCombos += pts;
+    this.combosHechos++;
+    const nombre = tipo === 'triple' ? '¡COMBO TRIPLE!' : '¡COMBO PATADA!';
+    this.textoFlotante(a.x, a.y - a.z - a.alto - 20, nombre + '\n+' + pts, tipo === 'triple' ? '#ffd34f' : '#5ff4ff');
+    Sonido.elegir();
+  }
+
+  // Texto que sube y se desvanece (tambien se ve en el otro dispositivo)
+  textoFlotante(x, y, texto, color, local) {
+    if (!local) RED.enviar({ t: 'tf', x: Math.round(x), y: Math.round(y), x2: texto, c: color });
+    x = Phaser.Math.Clamp(x, 110, 850);
+    const t = this.add.text(x, y, texto, ESTILO(22, color)).setOrigin(0.5).setDepth(9700);
+    this.tweens.add({ targets: t, y: y - 60, alpha: 0, delay: 500, duration: 700, onComplete: () => t.destroy() });
   }
 
   jugadorSinVida(a) {
@@ -644,6 +718,7 @@ class EscenaNivel extends Phaser.Scene {
       if (e.estado === 'muerto' && !e.contado) {
         e.contado = true;
         this.puntos += e.cfg.puntos || 0;
+        this.puntosEnemigos += e.cfg.puntos || 0;
         if (e.esBoss) this.nivelTerminado();
       }
     }
@@ -682,8 +757,9 @@ class EscenaNivel extends Phaser.Scene {
     }));
   }
 
-  // Puntaje del nivel: premio por terminar rapido, menos el daño recibido y las vidas perdidas.
-  // Los valores se cambian en config-juego.js -> "puntaje" (o en el panel admin).
+  // Puntaje del nivel: enemigos + combos + premio por terminar rapido − daño recibido − vidas perdidas,
+  // todo multiplicado por la dificultad (FÁCIL x0.5, NORMAL x1, DIFÍCIL x2). Nunca baja de 0.
+  // Los valores se cambian en config-juego.js -> "puntaje", "combos" y "dificultades" (o en el panel admin).
   calcularPuntaje(gano) {
     const P = Object.assign({ bonoTiempo: 5000, puntosPorSegundo: 25, porDanio: 10, porVida: 1000 },
       window.JUEGO.config.puntaje || {});
@@ -691,9 +767,11 @@ class EscenaNivel extends Phaser.Scene {
     const bono = gano ? Math.max(0, Math.round(P.bonoTiempo - seg * P.puntosPorSegundo)) : 0;
     const restaDanio = Math.round(this.danioRecibido * P.porDanio);
     const restaVidas = this.vidasPerdidas * P.porVida;
-    const total = Math.max(0, this.puntos + bono - restaDanio - restaVidas);
-    return { seg, base: this.puntos, bono, danio: Math.round(this.danioRecibido), restaDanio,
-             vidas: this.vidasPerdidas, restaVidas, total };
+    const mult = this.dif.puntos || 1;
+    const nivel = Math.max(0, Math.round((this.puntosEnemigos + this.puntosCombos + bono - restaDanio - restaVidas) * mult));
+    return { seg, anteriores: this.puntosInicio, base: this.puntosEnemigos, combos: this.puntosCombos, nCombos: this.combosHechos,
+             bono, danio: Math.round(this.danioRecibido), restaDanio, vidas: this.vidasPerdidas, restaVidas,
+             dif: this.dif.nombre, mult, nivel, total: this.puntosInicio + nivel };
   }
 
   // Cartel con la cuenta de puntos del nivel. Sigue solo, o antes con cualquier tecla / toque.
@@ -701,31 +779,34 @@ class EscenaNivel extends Phaser.Scene {
   mostrarResumen(r, alTerminar) {
     if (alTerminar) RED.enviar({ t: 'res', r });
     const D = 9900, cont = this.add.container(0, 0).setDepth(D);
-    cont.add(this.add.rectangle(480, 360, 640, 430, 0x000000, 0.82).setStrokeStyle(4, 0xff4fd8));
-    cont.add(this.add.text(480, 180, 'RESULTADO DEL NIVEL', ESTILO(32, '#ffd34f')).setOrigin(0.5));
+    cont.add(this.add.rectangle(480, 360, 660, 500, 0x000000, 0.85).setStrokeStyle(4, 0xff4fd8));
+    cont.add(this.add.text(480, 145, 'RESULTADO DEL NIVEL', ESTILO(32, '#ffd34f')).setOrigin(0.5));
     const filas = [
       ['Puntos por enemigos', '' + r.base, '#ffffff'],
+      ['Combos (' + (r.nCombos || 0) + ')', '+' + (r.combos || 0), '#ffd34f'],
       ['Tiempo ' + formatoTiempo(r.seg), '+' + r.bono, '#5ff4ff'],
       ['Daño recibido (' + r.danio + ')', '-' + r.restaDanio, '#ff4f6a'],
       ['Vidas perdidas (' + r.vidas + ')', '-' + r.restaVidas, '#ff4f6a'],
-      ['TOTAL', '' + r.total, '#ffd34f']
+      ['Dificultad ' + r.dif, 'x' + r.mult, '#ff4fd8']
     ];
+    if (r.anteriores) filas.push(['Puntos de antes', '+' + r.anteriores, '#9fb4ff']);
+    filas.push(['TOTAL', '' + r.total, '#ffd34f']);
     filas.forEach((f, i) => {
-      const y = 245 + i * 56 + (i === filas.length - 1 ? 14 : 0);
+      const y = 200 + i * 44 + (i === filas.length - 1 ? 12 : 0);
       const izq = this.add.text(200, y, f[0], ESTILO(i === filas.length - 1 ? 30 : 24, f[2])).setOrigin(0, 0.5).setAlpha(0);
       const der = this.add.text(760, y, f[1], ESTILO(i === filas.length - 1 ? 30 : 24, f[2])).setOrigin(1, 0.5).setAlpha(0);
       cont.add([izq, der]);
-      this.time.delayedCall(300 + i * 380, () => {
+      this.time.delayedCall(300 + i * 300, () => {
         izq.setAlpha(1); der.setAlpha(1);
         if (alTerminar) (i === filas.length - 1 ? Sonido.elegir : Sonido.menu)();
       });
     });
     const textoSigue = !alTerminar ? 'Esperando que siga el otro jugador...'
       : (this.tactil ? 'Tocá para seguir' : 'Apretá una tecla para seguir');
-    const sigue = this.add.text(480, 545, textoSigue, ESTILO(18, '#9fb4ff')).setOrigin(0.5).setAlpha(0);
+    const sigue = this.add.text(480, 585, textoSigue, ESTILO(18, '#9fb4ff')).setOrigin(0.5).setAlpha(0);
     cont.add(sigue);
 
-    const tEspera = 300 + filas.length * 380 + 400;
+    const tEspera = 300 + filas.length * 300 + 400;
     this.time.delayedCall(tEspera, () => sigue.setAlpha(1));
     if (!alTerminar) return;
 
@@ -787,7 +868,7 @@ class EscenaNivel extends Phaser.Scene {
       h.vidas.setText(j.fuera ? 'AFUERA' : '♥ x ' + Math.max(0, j.vidas));
     });
     this.textoPuntos.setText('PUNTOS ' + this.puntos);
-    this.textoTiempo.setText('TIEMPO ' + formatoTiempo(this.tiempo));
+    this.textoTiempo.setText('TIEMPO ' + formatoTiempo(this.tiempo) + '   ·   ' + this.dif.nombre);
     const nv = 'NIVEL ' + (this.numNivel + 1) + '  ·  ';
     this.textoOleada.setText(nv + (this.boss || this.hayJefe ? 'JEFE FINAL' : (this.oleada ? 'OLEADA ' + this.oleada + ' / ' + this.nivel.oleadas.length : '')));
 

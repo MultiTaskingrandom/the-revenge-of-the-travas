@@ -13,11 +13,12 @@ function formatoTiempo(seg) {
 function controlesDefecto() { return JSON.parse(JSON.stringify(window.JUEGO.CONTROLES_DEFECTO)); }
 
 function leerOpciones() {
-  let o = { vidas: 3, personaje: 'angie', fuegoAmigo: false, controles: controlesDefecto() };
+  let o = { vidas: 3, dificultad: 'normal', personaje: 'angie', fuegoAmigo: false, controles: controlesDefecto() };
   try {
     const g = JSON.parse(localStorage.getItem('trav_opciones'));
     if (g) {
       o.vidas = g.vidas || o.vidas;
+      if (window.JUEGO.DIFICULTADES.includes(g.dificultad)) o.dificultad = g.dificultad;
       if (window.JUEGO.JUGABLES.includes(g.personaje)) o.personaje = g.personaje;
       o.fuegoAmigo = !!g.fuegoAmigo;
       if (g.controles) for (const acc in o.controles) if (Array.isArray(g.controles[acc])) o.controles[acc] = g.controles[acc];
@@ -29,17 +30,18 @@ function guardarOpciones(o) {
   try { localStorage.setItem('trav_opciones', JSON.stringify(o)); } catch (e) {}
 }
 
+const TEXTO_COMBOS = 'COMBOS (¡dan puntos!)\nPIÑA, PIÑA, PIÑA: combo triple\nPIÑA, PIÑA, PATADA: combo patada';
+
 function textoControles(ctrl) {
   if (window.esTactil()) {
-    return 'CONTROLES\n\nJoystick (izquierda): caminar\nPIÑA: piña (3 seguidas = combo)\nPATADA: patada\nSALTO: saltar (¡y patada en el aire!)\nII: pausa';
+    return 'CONTROLES\n\nJoystick (izquierda): caminar\nPIÑA: piña   ·   PATADA: patada\nSALTO: saltar (¡y patada en el aire!)\nII: pausa\n\n' + TEXTO_COMBOS;
   }
   const t = (acc) => ctrl[acc].filter((c) => c).map(nombreTecla).join(' o ');
   return 'CONTROLES\n\n' +
     t('izquierda') + ' / ' + t('derecha') + ' / ' + t('arriba') + ' / ' + t('abajo') + ': caminar\n' +
-    t('pinia') + ': piña (3 seguidas = combo)\n' +
-    t('patada') + ': patada\n' +
+    t('pinia') + ': piña   ·   ' + t('patada') + ': patada\n' +
     t('salto') + ': saltar (¡patada en el aire!)\n' +
-    t('pausa') + ': pausa';
+    t('pausa') + ': pausa\n\n' + TEXTO_COMBOS;
 }
 
 function fondoEstrellas(scene) {
@@ -130,17 +132,20 @@ class EscenaMenu extends Phaser.Scene {
       this.crearOpciones(['CREAR PARTIDA', 'UNIRME CON CÓDIGO', 'VOLVER'], 500, 54, 32);
     } else if (this.modo === 'opciones') {
       this.ayuda.setText(this.tactil ? 'Tocá una opción para cambiarla' : '◀ ▶ cambian el valor  ·  ESC vuelve');
-      this.items.push(this.add.text(480, 448, 'OPCIONES', ESTILO(26, '#ffd34f')).setOrigin(0.5));
+      this.items.push(this.add.text(480, 442, 'OPCIONES', ESTILO(24, '#ffd34f')).setOrigin(0.5));
       // en celular no se muestra "CONTROLES" (son para teclado)
-      this.ids = this.tactil ? ['vidas', 'fuego', 'volver'] : ['vidas', 'fuego', 'controles', 'volver'];
+      this.ids = this.tactil ? ['vidas', 'dificultad', 'fuego', 'volver'] : ['vidas', 'dificultad', 'fuego', 'controles', 'volver'];
+      const dif = window.JUEGO.config.dificultades[this.opc.dificultad];
       const textos = {
         vidas: 'VIDAS:  ◀ ' + this.opc.vidas + ' ▶',
+        // la dificultad cambia la fuerza de los enemigos y multiplica los puntos de la partida
+        dificultad: 'DIFICULTAD:  ◀ ' + dif.nombre + ' ▶  (puntos x' + dif.puntos + ')',
         // fuego amigo: de a 2, las piñas y patadas también lastiman al compañero
         fuego: 'FUEGO AMIGO:  ◀ ' + (this.opc.fuegoAmigo ? 'SÍ' : 'NO') + ' ▶',
         controles: 'CONTROLES',
         volver: 'VOLVER'
       };
-      this.crearOpciones(this.ids.map((id) => textos[id]), 498, 50, 28);
+      this.crearOpciones(this.ids.map((id) => textos[id]), 480, 44, 26);
     } else {
       this.ayuda.setText(this.esperandoTecla ? 'Presioná la tecla nueva  ·  ESC cancela'
         : '◀ ▶ eligen tecla 1 o 2  ·  ENTER cambia  ·  SUPR borra  ·  ESC vuelve');
@@ -217,6 +222,10 @@ class EscenaMenu extends Phaser.Scene {
       if (id === 'vidas') {
         // con el dedo (circular) da la vuelta: 1, 2, ... 9, 1
         this.opc.vidas = circular ? (this.opc.vidas % 9) + 1 : Phaser.Math.Clamp(this.opc.vidas + d, 1, 9);
+      } else if (id === 'dificultad') {
+        const L = window.JUEGO.DIFICULTADES, i = L.indexOf(this.opc.dificultad);
+        // con el dedo da la vuelta: FÁCIL, NORMAL, DIFÍCIL, FÁCIL...
+        this.opc.dificultad = circular ? L[(i + 1) % L.length] : L[Phaser.Math.Clamp(i + d, 0, L.length - 1)];
       } else if (id === 'fuego') this.opc.fuegoAmigo = !this.opc.fuegoAmigo;
       else return;
       guardarOpciones(this.opc);
@@ -232,7 +241,7 @@ class EscenaMenu extends Phaser.Scene {
   volver() {
     if (this.modo === 'opciones') { this.modo = 'principal'; this.sel = 2; }
     else if (this.modo === 'dea2') { this.modo = 'principal'; this.sel = 1; }
-    else if (this.modo === 'controles') { this.modo = 'opciones'; this.sel = 2; }
+    else if (this.modo === 'controles') { this.modo = 'opciones'; this.sel = this.ids.indexOf('controles') >= 0 ? 3 : 0; }
     else return;
     Sonido.menu();
     this.armarMenu();
@@ -460,7 +469,7 @@ class EscenaSala extends Phaser.Scene {
         this.tweens.add({ targets: this.codigoTxt, scale: 1.08, duration: 500, yoyo: true, repeat: -1 });
       }, () => {
         this.texto.setText('¡Se unió alguien! Conectando...');
-        RED.enviar({ t: 'hola', anfitrion: mio, invitado: otro, fuego: !!this.opc().fuegoAmigo });
+        RED.enviar({ t: 'hola', anfitrion: mio, invitado: otro, fuego: !!this.opc().fuegoAmigo, dif: this.opc().dificultad });
       }, error);
       RED.oyente = (m) => { if (m.t === 'listo') this.conectados(mio, otro, true); };
     } else {
@@ -471,6 +480,7 @@ class EscenaSala extends Phaser.Scene {
         else if (m.t === 'hola') {
           this.registry.set('personaje', m.invitado);
           this.fuego = !!m.fuego;
+          this.dif = m.dif;
           this.conectados(m.anfitrion, m.invitado, false);
           RED.enviar({ t: 'listo' });
         } else if (m.t === 'empezar') this.irAlNivel(m.tipos);
@@ -487,8 +497,9 @@ class EscenaSala extends Phaser.Scene {
     this.tweens.killTweensOf(this.codigoTxt); this.codigoTxt.setScale(1);
     const yo = soyAnfitrion ? anf : inv;
     const fuego = soyAnfitrion ? !!this.opc().fuegoAmigo : this.fuego;
+    const dif = C.dificultades[(soyAnfitrion ? this.opc().dificultad : this.dif) || 'normal'] || C.dificultades.normal;
     this.texto.setText('Vas a jugar con ' + C.personajes[yo].nombre +
-      '\nFuego amigo: ' + (fuego ? 'SÍ (¡cuidado con pegarle a tu compañera!)' : 'NO') + '\n\n¡Prepárense!');
+      '\nDificultad: ' + dif.nombre + '   ·   Fuego amigo: ' + (fuego ? 'SÍ' : 'NO') + '\n\n¡Prepárense!');
     imagenPersonaje(this, anf, 140, 620, 200);
     imagenPersonaje(this, inv, 820, 620, 200).setFlipX(true);
     if (soyAnfitrion) {

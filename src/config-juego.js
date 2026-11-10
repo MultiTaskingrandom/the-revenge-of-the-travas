@@ -3,9 +3,9 @@
 window.CONFIG_JUEGO = {
   "personajes": {
     "angie": { "nombre": "ANGIE", "alto": 165, "hp": 100, "vel": 240, "velY": 150, "salto": 640,
-               "punio": 10, "remate": 16, "patada": 14, "patadaAire": 18 },
+               "punio": 10, "remate": 16, "patada": 10, "patadaAire": 12, "comboPatada": 20 },
     "lula": { "nombre": "LULA", "alto": 165, "hp": 100, "vel": 240, "velY": 150, "salto": 640,
-              "punio": 10, "remate": 16, "patada": 14, "patadaAire": 18 },
+              "punio": 10, "remate": 16, "patada": 10, "patadaAire": 12, "comboPatada": 20 },
     "turro1": { "nombre": "TURRO", "alto": 160, "hp": 50, "vel": 120, "velY": 85, "punio": 7, "patada": 9,
                 "esperaMin": 0.9, "esperaMax": 1.7, "alcance": 100, "puntos": 100, "dispara": false, "bala": 10 },
     "turro2": { "nombre": "TURRO", "alto": 160, "hp": 50, "vel": 120, "velY": 85, "punio": 7, "patada": 9,
@@ -49,6 +49,15 @@ window.CONFIG_JUEGO = {
   },
   "cooperativo": {
     "vidaEnemigos": 1.5
+  },
+  "combos": {
+    "triple": 150,
+    "piniaPatada": 250
+  },
+  "dificultades": {
+    "facil": { "nombre": "FÁCIL", "puntos": 0.5, "vidaEnemigos": 0.75, "danioEnemigos": 0.6 },
+    "normal": { "nombre": "NORMAL", "puntos": 1, "vidaEnemigos": 1, "danioEnemigos": 1 },
+    "dificil": { "nombre": "DIFÍCIL", "puntos": 2, "vidaEnemigos": 1.3, "danioEnemigos": 1.5 }
   },
   "fondosExtra": {}
 };

@@ -15,6 +15,8 @@ window.JUEGO = {
   TIPOS_ENEMIGO: ['turro1', 'turro2', 'bossfinal'],
   // Personajes que puede usar el jugador
   JUGABLES: ['angie', 'lula'],
+  // Dificultades en orden (los valores de cada una estan en config-juego.js -> "dificultades")
+  DIFICULTADES: ['facil', 'normal', 'dificil'],
 
   // Controles por defecto: dos teclas por accion (codigos de teclado; 0 = sin tecla)
   CONTROLES_DEFECTO: {
@@ -42,6 +44,13 @@ window.JUEGO.config = (function () {
   // Configuraciones viejas (sin Lula o sin "cooperativo"): se completan con valores por defecto
   if (!c.personajes.lula) c.personajes.lula = Object.assign({}, c.personajes.angie, { nombre: 'LULA' });
   c.cooperativo = Object.assign({ vidaEnemigos: 1.5 }, c.cooperativo || {});
+  c.combos = Object.assign({ triple: 150, piniaPatada: 250 }, c.combos || {});
+  c.dificultades = Object.assign({
+    facil: { nombre: 'FÁCIL', puntos: 0.5, vidaEnemigos: 0.75, danioEnemigos: 0.6 },
+    normal: { nombre: 'NORMAL', puntos: 1, vidaEnemigos: 1, danioEnemigos: 1 },
+    dificil: { nombre: 'DIFÍCIL', puntos: 2, vidaEnemigos: 1.3, danioEnemigos: 1.5 }
+  }, c.dificultades || {});
+  ['angie', 'lula'].forEach((t) => { if (c.personajes[t].comboPatada == null) c.personajes[t].comboPatada = 20; });
   return c;
 })();
 
