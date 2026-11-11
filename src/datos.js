@@ -12,7 +12,9 @@ window.JUEGO = {
   GRAVEDAD: 1700,
 
   // Tipos de personaje que existen (cada uno tiene su hoja de sprites)
-  TIPOS_ENEMIGO: ['turro1', 'turro2', 'bossfinal', 'chaleco', 'campera', 'doctorazul', 'doctorrojo', 'doctorverde'],
+  TIPOS_ENEMIGO: ['turro1', 'turro2', 'bossfinal', 'chaleco', 'campera', 'doctorazul', 'doctorrojo', 'doctorverde', 'turrosorpresa'],
+  // Enemigo que aparece de sorpresa (probabilidad por nivel: "sorpresa" en config-juego.js)
+  TIPO_SORPRESA: 'turrosorpresa',
   // Personajes que puede usar el jugador
   JUGABLES: ['angie', 'lula'],
   // Dificultades en orden (los valores de cada una estan en config-juego.js -> "dificultades")
@@ -47,6 +49,9 @@ window.JUEGO.config = (function () {
   window.JUEGO.TIPOS_ENEMIGO.forEach((t) => {
     if (!c.personajes[t]) c.personajes[t] = Object.assign({}, c.personajes.turro1, { nombre: t.toUpperCase() });
   });
+  // Turro Sorpresa por defecto: triple de velocidad y 5 veces los puntos del turro comun
+  const ts = c.personajes.turrosorpresa, t1 = c.personajes.turro1;
+  if (ts.nombre === 'TURROSORPRESA') Object.assign(ts, { nombre: 'TURRO SORPRESA', vel: t1.vel * 3, velY: t1.velY * 3, puntos: t1.puntos * 5 });
   c.cooperativo = Object.assign({ vidaEnemigos: 1.5 }, c.cooperativo || {});
   c.combos = Object.assign({ triple: 150, piniaPatada: 250 }, c.combos || {});
   c.dificultades = Object.assign({
@@ -58,6 +63,7 @@ window.JUEGO.config = (function () {
   c.niveles.forEach((n) => {
     if (!Array.isArray(n.historia)) n.historia = [];
     if (!Array.isArray(n.historiaFinal)) n.historiaFinal = [];   // historia al terminar el nivel
+    if (typeof n.sorpresa !== 'number') n.sorpresa = 0;          // % de que aparezca el Turro Sorpresa
   });
   ['angie', 'lula'].forEach((t) => { if (c.personajes[t].comboPatada == null) c.personajes[t].comboPatada = 20; });
   return c;

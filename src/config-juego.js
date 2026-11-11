@@ -29,7 +29,7 @@ window.CONFIG_JUEGO = {
       "comboPatada": 20
     },
     "turro1": {
-      "nombre": "BOOS1",
+      "nombre": "Turron",
       "alto": 160,
       "hp": 50,
       "vel": 120,
@@ -44,7 +44,7 @@ window.CONFIG_JUEGO = {
       "bala": 10
     },
     "turro2": {
-      "nombre": "BOOS2",
+      "nombre": "Turroman",
       "alto": 160,
       "hp": 50,
       "vel": 120,
@@ -59,7 +59,7 @@ window.CONFIG_JUEGO = {
       "bala": 10
     },
     "bossfinal": {
-      "nombre": "BOOS3",
+      "nombre": "Turroend",
       "alto": 215,
       "hp": 100,
       "vel": 100,
@@ -147,6 +147,21 @@ window.CONFIG_JUEGO = {
       "puntos": 100,
       "dispara": false,
       "bala": 10
+    },
+    "turrosorpresa": {
+      "nombre": "TURRO SORPRESA",
+      "alto": 160,
+      "hp": 50,
+      "vel": 360,
+      "velY": 255,
+      "punio": 7,
+      "patada": 9,
+      "esperaMin": 0.9,
+      "esperaMax": 1.7,
+      "alcance": 100,
+      "puntos": 500,
+      "dispara": false,
+      "bala": 10
     }
   },
   "niveles": [
@@ -156,6 +171,7 @@ window.CONFIG_JUEGO = {
       "pisoMin": 480,
       "pisoMax": 712,
       "intro": "",
+      "sorpresa": 30,
       "historia": [
         "Angie una ves en el hipodromo detecta la precencia de turros....",
         "Y comienza el despiole!"
@@ -238,6 +254,7 @@ window.CONFIG_JUEGO = {
       "pisoMin": 520,
       "pisoMax": 712,
       "intro": "",
+      "sorpresa": 30,
       "historia": [
         "Mierda el 22 me dejo mas lejos que la mierda.",
         "vamos a ver que onda aca",
@@ -321,6 +338,7 @@ window.CONFIG_JUEGO = {
       "pisoMin": 560,
       "pisoMax": 712,
       "intro": "",
+      "sorpresa": 30,
       "historia": [
         "uuu me comi el viaje me bajeu nu poco antes del bondo",
         "bue aca ta lleno de turros",
@@ -422,6 +440,7 @@ window.CONFIG_JUEGO = {
       "pisoMin": 615,
       "pisoMax": 712,
       "intro": "",
+      "sorpresa": 30,
       "historia": [
         "Bue culiau casi que no llegaba mas",
         "jojojo aca se pone fea la cosa",
@@ -516,7 +535,7 @@ window.CONFIG_JUEGO = {
       "Recibe un llamado de un fiel amigo, \"el viejo verde\",\nde inconvenientes en el hipódromo y de un ataque de turros.",
       "Entonces decide ir a poner orden."
     ],
-    "victoria": "¡MUY BIEN ANGIE, GANASTE!\nVas a poder volver a las calles de gira",
+    "victoria": "¡Lo lograste\"\nlimpiaste Buens Aires de turros\nLas calles son seguras de nuevo!",
     "derrota": "Los turros ganaron esta noche...\npero Angie no se rinde.",
     "nivelSuperado": "¡NIVEL SUPERADO!"
   },

@@ -29,6 +29,9 @@ class EscenaNivel extends Phaser.Scene {
     this.balas = [];
     this.jugadores = [];
     this.pendientes = 0;
+    // Turro Sorpresa: con la probabilidad del nivel (%) aparece una vez, en una oleada al azar (nunca con el jefe)
+    const nOl = (this.nivel.oleadas || []).length;
+    this.oleadaSorpresa = nOl && Math.random() * 100 < (this.nivel.sorpresa || 0) ? Phaser.Math.Between(1, nOl) : 0;
     this.hitStop = 0;
     this.pausado = false;
     this.ultimoAtaqueEnemigo = 0;
@@ -326,6 +329,17 @@ class EscenaNivel extends Phaser.Scene {
         this.pendientes--;
       });
     });
+    // el Turro Sorpresa entra en algun momento de esta oleada (la oleada no termina hasta que llega)
+    if (this.oleada === this.oleadaSorpresa) {
+      this.pendientes++;
+      this.time.delayedCall(Phaser.Math.Between(1500, 9000), () => {
+        this.pendientes--;
+        if (this.fase === 'boss' || this.fase === 'fin') return;
+        const tipo = window.JUEGO.TIPO_SORPRESA;
+        this.anuncio('¡' + window.JUEGO.config.personajes[tipo].nombre + '!', '#ffd34f', 1300, 40);
+        this.crearEnemigo(tipo, Math.random() < 0.5 ? 1050 : -90, false);
+      });
+    }
   }
 
   lanzarBoss() {
