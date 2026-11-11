@@ -195,7 +195,10 @@ class EscenaNivel extends Phaser.Scene {
     this.espejo = { j: [], e: {}, balas: [], estado: null };
     this.ultimoDir = '';
     this.dirT = 0;
+    // mensajes que llegaron mientras se pasaba de la historia al nivel
+    const pendientes = RED.cola || []; RED.cola = null;
     RED.oyente = (m) => this.recibir(m);
+    pendientes.forEach((m) => this.recibir(m));
     RED.alCortarse = () => {
       RED.cerrar();
       this.anuncio('SE CORTÓ LA CONEXIÓN', '#ff4f6a', 2500, 40, true);
@@ -212,11 +215,18 @@ class EscenaNivel extends Phaser.Scene {
     else if (m.t === 'sh') this.cameras.main.shake(m.d, m.i);
     else if (m.t === 'res') this.mostrarResumen(m.r, null);
     else if (m.t === 'niv') {
-      this.cameras.main.fadeOut(500, 0, 0, 0);
-      this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('nivel', { nivel: m.n, tipos: m.tipos }));
+      // siguiente nivel: primero su historia (si tiene), que la va pasando el anfitrion
+      guardarMensajesRed();
+      this.cameras.main.fade(500, 0, 0, 0, true);   // true: aunque todavia este apareciendo
+      this.cameras.main.once('camerafadeoutcomplete', () =>
+        this.scene.start('historia', { nivel: m.n, datosNivel: { nivel: m.n, tipos: m.tipos } }));
     } else if (m.t === 'fin') {
-      this.cameras.main.fadeOut(500, 0, 0, 0);
-      this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('final', m.d));
+      // ganaron: primero la historia del final del ultimo nivel (la pasa el anfitrion)
+      if (m.d.gano) guardarMensajesRed();
+      const n = window.JUEGO.config.niveles.length;
+      this.cameras.main.fade(500, 0, 0, 0, true);
+      this.cameras.main.once('camerafadeoutcomplete', () =>
+        m.d.gano ? this.scene.start('historia', { nivel: n, datosFinal: m.d }) : this.scene.start('final', m.d));
     }
   }
 
@@ -751,8 +761,9 @@ class EscenaNivel extends Phaser.Scene {
           .map((j) => ({ tipo: j.tipo, vidas: j.vidas, remoto: j.remoto }));
         RED.enviar({ t: 'niv', n: this.numNivel + 1, tipos: siguen.map((j) => j.tipo) });
         this.cameras.main.fadeOut(500, 0, 0, 0);
+        const n = this.numNivel + 1;
         this.cameras.main.once('camerafadeoutcomplete', () =>
-          this.scene.start('nivel', { nivel: this.numNivel + 1, puntos: this.puntos, jugadores: siguen }));
+          this.scene.start('historia', { nivel: n, datosNivel: { nivel: n, puntos: this.puntos, jugadores: siguen } }));
       } else this.irAFinal(true);
     }));
   }
@@ -829,7 +840,10 @@ class EscenaNivel extends Phaser.Scene {
     const d = { gano, puntos: this.puntos, resumen, tipos: this.jugadores.map((j) => j.tipo), coop: this.jugadores.length > 1 };
     RED.enviar({ t: 'fin', d });
     this.cameras.main.fadeOut(500, 0, 0, 0);
-    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('final', d));
+    // si gano el ultimo nivel, antes de la victoria va su "historia al terminar" (si tiene)
+    const n = window.JUEGO.config.niveles.length;
+    this.cameras.main.once('camerafadeoutcomplete', () =>
+      gano ? this.scene.start('historia', { nivel: n, datosFinal: d }) : this.scene.start('final', d));
   }
 
   // ---------------- Pantalla (HUD) ----------------

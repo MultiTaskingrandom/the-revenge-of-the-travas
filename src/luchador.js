@@ -13,6 +13,8 @@ class Luchador {
     // (_refH: hojas con algo arriba de la cabeza, como el paraguas de Lula, que no cuenta para la altura)
     this.escalaBase = this.alto / (this.meta._refH || this.meta.parado.h);
     this.escalaFila2 = this.meta.punio2.h / this.meta.punio3.h;
+    // Hojas donde la caida ya esta dibujada acostada (los Doctores): no se gira al caer
+    this.caidaAcostada = this.meta.caida.w > this.meta.caida.h * 1.5;
 
     this.x = x; this.y = y; this.z = 0;
     this.vx = 0; this.vy = 0; this.vz = 0;
@@ -162,7 +164,7 @@ class Luchador {
     this.spr.x = this.x;
     this.spr.y = this.y - this.z;
     this.spr.setFlipX(this.dir < 0);
-    this.spr.angle = this.estado === 'caido' ? this.angulo : 0;
+    this.spr.angle = this.estado === 'caido' && !(this.caidaAcostada && this.poseActual === 'caida') ? this.angulo : 0;
     this.spr.setDepth(this.y);
     this.sombra.x = this.x;
     this.sombra.y = this.y;

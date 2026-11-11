@@ -12,7 +12,7 @@ window.JUEGO = {
   GRAVEDAD: 1700,
 
   // Tipos de personaje que existen (cada uno tiene su hoja de sprites)
-  TIPOS_ENEMIGO: ['turro1', 'turro2', 'bossfinal'],
+  TIPOS_ENEMIGO: ['turro1', 'turro2', 'bossfinal', 'chaleco', 'campera', 'doctorazul', 'doctorrojo', 'doctorverde'],
   // Personajes que puede usar el jugador
   JUGABLES: ['angie', 'lula'],
   // Dificultades en orden (los valores de cada una estan en config-juego.js -> "dificultades")
@@ -43,6 +43,10 @@ window.JUEGO.config = (function () {
   }
   // Configuraciones viejas (sin Lula o sin "cooperativo"): se completan con valores por defecto
   if (!c.personajes.lula) c.personajes.lula = Object.assign({}, c.personajes.angie, { nombre: 'LULA' });
+  // Enemigos agregados despues: si faltan, se copian del turro comun
+  window.JUEGO.TIPOS_ENEMIGO.forEach((t) => {
+    if (!c.personajes[t]) c.personajes[t] = Object.assign({}, c.personajes.turro1, { nombre: t.toUpperCase() });
+  });
   c.cooperativo = Object.assign({ vidaEnemigos: 1.5 }, c.cooperativo || {});
   c.combos = Object.assign({ triple: 150, piniaPatada: 250 }, c.combos || {});
   c.dificultades = Object.assign({
@@ -50,6 +54,11 @@ window.JUEGO.config = (function () {
     normal: { nombre: 'NORMAL', puntos: 1, vidaEnemigos: 1, danioEnemigos: 1 },
     dificil: { nombre: 'DIFÍCIL', puntos: 2, vidaEnemigos: 1.3, danioEnemigos: 1.5 }
   }, c.dificultades || {});
+  // historia antes de cada nivel (lista de pantallas)
+  c.niveles.forEach((n) => {
+    if (!Array.isArray(n.historia)) n.historia = [];
+    if (!Array.isArray(n.historiaFinal)) n.historiaFinal = [];   // historia al terminar el nivel
+  });
   ['angie', 'lula'].forEach((t) => { if (c.personajes[t].comboPatada == null) c.personajes[t].comboPatada = 20; });
   return c;
 })();

@@ -309,26 +309,83 @@ class EscenaMenu extends Phaser.Scene {
   }
 }
 
+// Pantallas de historia antes de un nivel:
+//  - nivel 1: la historia general (Textos) + la del nivel + los controles
+//  - los demas: "historia al terminar" del nivel anterior + "historia antes" de este (panel admin → Niveles)
+//  - numNivel = cantidad de niveles: solo la "historia al terminar" del ultimo (antes de la pantalla de victoria)
+// Devuelve { lineas, nFinal } (nFinal = cuantas del principio son del final del nivel anterior)
+function lineasHistoria(numNivel, opc) {
+  const C = window.JUEGO.config;
+  const n = C.niveles[numNivel] || {};
+  if (numNivel === 0) return { lineas: (C.textos.historia || []).concat(n.historia || [], [textoControles(opc.controles)]), nFinal: 0 };
+  const fin = (C.niveles[numNivel - 1] || {}).historiaFinal || [];
+  return { lineas: fin.concat(n.historia || []), nFinal: fin.length };
+}
+
+// Antes de cambiar de escena el invitado guarda lo que llega (para no perder mensajes durante el fundido)
+function guardarMensajesRed() {
+  RED.cola = [];
+  RED.oyente = (m) => RED.cola.push(m);
+}
+
+// Historia entre niveles. data: { nivel, datosNivel (lo que recibe la escena "nivel") }
+// o, despues del ultimo nivel ganado: { nivel: cantidad de niveles, datosFinal (lo que recibe la escena "final") }.
+// De a 2 la maneja el que creo la partida: el invitado ve las mismas pantallas a la par.
 class EscenaHistoria extends Phaser.Scene {
   constructor() { super('historia'); }
-  create() {
+  create(data) {
+    data = data || {};
     const C = window.JUEGO.config;
-    const opc = this.registry.get('opciones') || leerOpciones();
     // Phaser reutiliza la misma escena en cada partida: hay que reiniciar esta marca
     // (si no, la segunda vez la historia nunca pasaba al nivel)
     this.yendo = false;
-    this.add.image(480, 0, 'fondojugando').setOrigin(0.5, 0);
+    this.numNivel = data.nivel || 0;
+    this.datosNivel = data.datosNivel || { nivel: this.numNivel };
+    this.datosFinal = data.datosFinal || null;
+    this.rol = RED.activa() ? RED.rol : null;
+    const h = lineasHistoria(this.numNivel, this.registry.get('opciones') || leerOpciones());
+    this.lineas = h.lineas;
+    this.nFinal = h.nFinal;
+    // sin historia: directo al nivel o al final (el invitado espera el aviso "jugar")
+    if (!this.lineas.length && this.rol !== 'invitado') return this.empezar(true);
+    // fondo y titulo: las pantallas del final del nivel anterior van con su fondo; las de antes, con el del nivel que viene
+    const fondoDe = (n) => (n && this.textures.exists(n.fondo)) ? n.fondo : 'fondojugando';
+    const anterior = C.niveles[this.numNivel - 1], siguiente = C.niveles[this.numNivel];
+    const imagen = (clave) => this.add.image(480, 0, clave).setOrigin(0.5, 0)
+      .setDisplaySize(960, 960 * this.textures.get(clave).getSourceImage().height / this.textures.get(clave).getSourceImage().width);
+    this.fondoFin = anterior ? imagen(fondoDe(anterior)) : null;
+    this.fondoAntes = siguiente ? imagen(fondoDe(siguiente)) : null;
     this.add.rectangle(480, 360, 960, 720, 0x000000, 0.72);
-    this.lineas = (C.textos.historia || []).concat([textoControles(opc.controles)]);
+    this.tituloFin = anterior ? 'FIN DEL NIVEL ' + this.numNivel + (anterior.nombre ? ' · ' + anterior.nombre.toUpperCase() : '') : '';
+    this.tituloAntes = siguiente && this.numNivel > 0 ? 'NIVEL ' + (this.numNivel + 1) + (siguiente.nombre ? ' · ' + siguiente.nombre.toUpperCase() : '') : '';
+    this.titulo = this.add.text(480, 40, '', ESTILO(26, '#ffd34f')).setOrigin(0.5, 0);
     this.i = -1;
     this.texto = this.add.text(480, 330, '', ESTILO(28)).setOrigin(0.5);
     this.texto.setWordWrapWidth(900);
+    this.cameras.main.fadeIn(400);
+
+    if (this.rol === 'invitado') {
+      // el invitado solo mira: avanza cuando avanza el otro
+      this.add.text(480, 680, 'Avanza el que creó la partida', ESTILO(16, '#9fb4ff')).setOrigin(0.5);
+      const pendientes = RED.cola || []; RED.cola = null;
+      RED.oyente = (m) => {
+        if (m.t === 'hist') this.mostrar(m.i);
+        else if (m.t === 'jugar') this.empezar();
+      };
+      RED.alCortarse = () => { RED.cerrar(); this.scene.start('menu'); };
+      this.mostrar(0);
+      pendientes.forEach((m) => RED.oyente(m));
+      return;
+    }
+    if (this.rol === 'anfitrion') {
+      RED.oyente = () => {};
+      RED.alCortarse = () => RED.cerrar();   // se sigue jugando solo
+    }
     const tactil = window.esTactil();
     this.add.text(480, 680, tactil ? 'Tocá la pantalla para seguir' : 'ENTER: seguir  ·  ESC: saltar historia', ESTILO(16, '#9fb4ff')).setOrigin(0.5);
     // boton para saltar la historia (sirve con mouse y con el dedo)
     const saltar = this.add.text(940, 24, 'SALTAR ▶▶', ESTILO(22, '#ffd34f')).setOrigin(1, 0).setInteractive({ useHandCursor: true });
     saltar.on('pointerdown', (p, x, y, ev) => { ev.stopPropagation(); this.empezar(); });
-    this.cameras.main.fadeIn(400);
     this.siguiente();
     this.input.keyboard.on('keydown-ENTER', () => this.siguiente());
     this.input.keyboard.on('keydown-SPACE', () => this.siguiente());
@@ -336,17 +393,38 @@ class EscenaHistoria extends Phaser.Scene {
     this.input.on('pointerdown', (p, sobre) => { if (!sobre.includes(saltar)) this.siguiente(); });
   }
   siguiente() {
+    if (this.yendo) return;
     this.i++;
     if (this.i >= this.lineas.length) return this.empezar();
     Sonido.menu();
-    this.texto.setText(this.lineas[this.i]).setAlpha(0);
-    this.texto.setFontSize(this.i === this.lineas.length - 1 ? 24 : 28);
+    if (this.rol === 'anfitrion') RED.enviar({ t: 'hist', i: this.i });
+    this.mostrar(this.i);
+  }
+  mostrar(i) {
+    if (i >= this.lineas.length) return;
+    this.i = i;
+    const deFinal = i < this.nFinal;
+    if (this.fondoFin) this.fondoFin.setVisible(deFinal || !this.fondoAntes);
+    if (this.fondoAntes) this.fondoAntes.setVisible(!deFinal || !this.fondoFin);
+    this.titulo.setText(deFinal ? this.tituloFin : this.tituloAntes);
+    this.texto.setText(this.lineas[i]).setAlpha(0);
+    // la pantalla de controles (ultima del nivel 1) va con letra mas chica
+    this.texto.setFontSize(this.numNivel === 0 && i === this.lineas.length - 1 ? 24 : 28);
     this.tweens.add({ targets: this.texto, alpha: 1, duration: 350 });
   }
-  empezar() {
+  empezar(sinFundido) {
     if (this.yendo) return; this.yendo = true;
-    this.cameras.main.fadeOut(400, 0, 0, 0);
-    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('nivel', { nivel: 0 }));
+    // despues del ultimo nivel va a la pantalla de victoria; si no, al nivel
+    const destino = this.datosFinal ? 'final' : 'nivel';
+    const d = this.datosFinal || this.datosNivel;
+    if (this.rol === 'anfitrion') {
+      RED.enviar({ t: 'jugar' });
+      // si el otro se desconecto mientras leia, se sigue solo
+      if (!RED.activa() && d.jugadores) d.jugadores = d.jugadores.filter((j) => !j.remoto);
+    } else if (this.rol === 'invitado' && destino === 'nivel') guardarMensajesRed();
+    if (sinFundido) return this.scene.start(destino, d);
+    this.cameras.main.fade(400, 0, 0, 0, true);   // true: aunque todavia este apareciendo
+    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start(destino, d));
   }
 }
 
@@ -513,11 +591,13 @@ class EscenaSala extends Phaser.Scene {
 
   opc() { return this.registry.get('opciones') || leerOpciones(); }
 
+  // los dos pasan a la historia del nivel 1 (la maneja el que creo la partida)
   irAlNivel(tipos) {
     if (this.yendo) return;
     this.yendo = true;
+    if (RED.rol === 'invitado') guardarMensajesRed();
     this.cameras.main.fadeOut(400, 0, 0, 0);
-    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('nivel', { nivel: 0, tipos }));
+    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('historia', { nivel: 0, datosNivel: { nivel: 0, tipos } }));
   }
 
   salir() {

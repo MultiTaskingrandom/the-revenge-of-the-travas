@@ -6,7 +6,8 @@
 //
 // Mensajes (campo t):
 //   anfitrion -> invitado: hola, empezar, e (estado del juego), an (cartel), fx (golpe), sh (temblor),
-//                          snd (sonido), res (resultado del nivel), niv (siguiente nivel), fin (pantalla final), lleno
+//                          snd (sonido), res (resultado del nivel), niv (siguiente nivel), fin (pantalla final), lleno,
+//                          hist (pantalla de historia que se muestra), jugar (termina la historia, empieza el nivel)
 //   invitado -> anfitrion: in (direcciones apretadas), k (piña/patada/salto/pausa recien apretada)
 window.RED = {
   PREFIJO: 'revenge-of-the-travas-',
