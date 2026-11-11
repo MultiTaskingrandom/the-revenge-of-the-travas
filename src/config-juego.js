@@ -151,7 +151,7 @@ window.CONFIG_JUEGO = {
     "turrosorpresa": {
       "nombre": "TURRO SORPRESA",
       "alto": 160,
-      "hp": 50,
+      "hp": 1,
       "vel": 360,
       "velY": 255,
       "punio": 7,
@@ -171,7 +171,6 @@ window.CONFIG_JUEGO = {
       "pisoMin": 480,
       "pisoMax": 712,
       "intro": "",
-      "sorpresa": 30,
       "historia": [
         "Angie una ves en el hipodromo detecta la precencia de turros....",
         "Y comienza el despiole!"
@@ -246,7 +245,8 @@ window.CONFIG_JUEGO = {
         "pero parece que esto no temrmina aun...",
         "Unos de los turros se le escapo que hay bardo en el planetario",
         "entonces angie pone rumbo para alla!"
-      ]
+      ],
+      "sorpresa": 1
     },
     {
       "nombre": "El Planetario",
@@ -254,7 +254,6 @@ window.CONFIG_JUEGO = {
       "pisoMin": 520,
       "pisoMax": 712,
       "intro": "",
-      "sorpresa": 30,
       "historia": [
         "Mierda el 22 me dejo mas lejos que la mierda.",
         "vamos a ver que onda aca",
@@ -330,7 +329,8 @@ window.CONFIG_JUEGO = {
         "ring! ring! uuu q paso ahora?",
         "el viejo verde: che se pudrio en el obelisco veni que te necesitamos urgente!!!",
         "Bueeenoooo a comerlaaaaaa"
-      ]
+      ],
+      "sorpresa": 5
     },
     {
       "nombre": "La Calle de las Luces",
@@ -338,7 +338,6 @@ window.CONFIG_JUEGO = {
       "pisoMin": 560,
       "pisoMax": 712,
       "intro": "",
-      "sorpresa": 30,
       "historia": [
         "uuu me comi el viaje me bajeu nu poco antes del bondo",
         "bue aca ta lleno de turros",
@@ -432,7 +431,8 @@ window.CONFIG_JUEGO = {
         "jojojo como comierdo ver.... a no ajajaja",
         "viejo verde: che vas a venir ??",
         "uuu ta pesado el hombre... bueno voy"
-      ]
+      ],
+      "sorpresa": 1
     },
     {
       "nombre": "El Obelisco",
@@ -440,7 +440,6 @@ window.CONFIG_JUEGO = {
       "pisoMin": 615,
       "pisoMax": 712,
       "intro": "",
-      "sorpresa": 30,
       "historia": [
         "Bue culiau casi que no llegaba mas",
         "jojojo aca se pone fea la cosa",
@@ -524,7 +523,8 @@ window.CONFIG_JUEGO = {
         "Angie se los cojio a todo ejjeje",
         "bueno las calles de Buenos Aires estan limpia por un tiempo ... pero hasta cuando ???",
         "Mientras tanto Agie seguira en la clandestinidad apoyando a los suyos."
-      ]
+      ],
+      "sorpresa": 0.5
     }
   ],
   "textos": {
